@@ -10,6 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
@@ -114,6 +115,12 @@ export default function CreateListingScreen({ route, navigation }: any) {
   const [selectedPaymentPolicy, setSelectedPaymentPolicy] = useState<string>('');
   const [selectedReturnPolicy, setSelectedReturnPolicy] = useState<string>('');
   const [selectedShippingPolicy, setSelectedShippingPolicy] = useState<string>('');
+
+  // --- Policy Selector Modal States ---
+  const [policyModalVisible, setPolicyModalVisible] = useState(false);
+  const [policyModalTitle, setPolicyModalTitle] = useState('');
+  const [policyModalType, setPolicyModalType] = useState<'shipping' | 'return' | 'payment' | 'location'>('shipping');
+  const [policyModalOptions, setPolicyModalOptions] = useState<any[]>([]);
 
   // --- Method 1: Barcode States ---
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -1478,62 +1485,90 @@ export default function CreateListingScreen({ route, navigation }: any) {
                     {/* Shipping Policy */}
                     <View>
                       <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-2">Shipping Policy</Text>
-                      <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-1">
-                        <TextInput
-                          value={shippingPolicies.find((p) => p.policyId === selectedShippingPolicy)?.name || 'Default Shipping Policy'}
-                          editable={false}
-                          className="text-white py-3 text-sm font-bold"
-                        />
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setPolicyModalTitle('Select Shipping Policy');
+                          setPolicyModalType('shipping');
+                          setPolicyModalOptions(shippingPolicies);
+                          setPolicyModalVisible(true);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
+                      >
+                        <Text className="text-white text-sm font-bold">
+                          {shippingPolicies.find((p) => p.policyId === selectedShippingPolicy)?.name || 'Select Shipping Policy'}
+                        </Text>
+                        <ChevronRight color="#64748b" size={16} />
+                      </TouchableOpacity>
                     </View>
 
                     {/* Return Policy */}
                     <View>
                       <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-2">Return Policy</Text>
-                      <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-1">
-                        <TextInput
-                          value={returnPolicies.find((p) => p.policyId === selectedReturnPolicy)?.name || 'Default Return Policy'}
-                          editable={false}
-                          className="text-white py-3 text-sm font-bold"
-                        />
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setPolicyModalTitle('Select Return Policy');
+                          setPolicyModalType('return');
+                          setPolicyModalOptions(returnPolicies);
+                          setPolicyModalVisible(true);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
+                      >
+                        <Text className="text-white text-sm font-bold">
+                          {returnPolicies.find((p) => p.policyId === selectedReturnPolicy)?.name || 'Select Return Policy'}
+                        </Text>
+                        <ChevronRight color="#64748b" size={16} />
+                      </TouchableOpacity>
                     </View>
 
                     {/* Payment Policy */}
                     <View>
                       <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-2">Payment Policy</Text>
-                      <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-1">
-                        <TextInput
-                          value={paymentPolicies.find((p) => p.policyId === selectedPaymentPolicy)?.name || 'Default Payment Policy'}
-                          editable={false}
-                          className="text-white py-3 text-sm font-bold"
-                        />
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setPolicyModalTitle('Select Payment Policy');
+                          setPolicyModalType('payment');
+                          setPolicyModalOptions(paymentPolicies);
+                          setPolicyModalVisible(true);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
+                      >
+                        <Text className="text-white text-sm font-bold">
+                          {paymentPolicies.find((p) => p.policyId === selectedPaymentPolicy)?.name || 'Select Payment Policy'}
+                        </Text>
+                        <ChevronRight color="#64748b" size={16} />
+                      </TouchableOpacity>
                     </View>
 
                     {/* Shipping Origin Location / ZIP */}
                     <View>
                       <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-2">eBay Shipping Origin Location</Text>
-                      <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-1">
-                        {inventoryLocations.length > 0 ? (
-                          <View className="flex-row items-center justify-between">
-                            <TextInput
-                              value={inventoryLocations.find((loc) => `${loc.merchantLocationKey}::${loc.postalCode || ""}` === itemLocationZip)?.name || inventoryLocations[0].name}
-                              editable={false}
-                              className="text-white py-3 text-sm font-bold flex-1"
-                            />
-                            <Text className="text-sky-400 text-xs font-black bg-sky-500/10 px-2 py-1 rounded">
+                      {inventoryLocations.length > 0 ? (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setPolicyModalTitle('Select Origin Location');
+                            setPolicyModalType('location');
+                            setPolicyModalOptions(inventoryLocations);
+                            setPolicyModalVisible(true);
+                          }}
+                          className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
+                        >
+                          <View className="flex-row items-center justify-between flex-1 mr-2">
+                            <Text className="text-white text-sm font-bold flex-1" numberOfLines={1}>
+                              {inventoryLocations.find((loc) => `${loc.merchantLocationKey}::${loc.postalCode || ""}` === itemLocationZip)?.name || inventoryLocations[0].name}
+                            </Text>
+                            <Text className="text-sky-400 text-xs font-black bg-sky-500/10 px-2 py-1 rounded ml-2">
                               ZIP: {itemLocationZip.split("::")[1] || "None"}
                             </Text>
                           </View>
-                        ) : (
-                          <TextInput
-                            value="No eBay locations found. Please configure on web."
-                            editable={false}
-                            className="text-amber-400 py-3 text-sm font-bold"
-                          />
-                        )}
-                      </View>
+                          <ChevronRight color="#64748b" size={16} />
+                        </TouchableOpacity>
+                      ) : (
+                        <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                          <Text className="text-amber-400 text-sm font-bold">
+                            No eBay locations found. Please configure on web.
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 )}
@@ -1709,6 +1744,93 @@ export default function CreateListingScreen({ route, navigation }: any) {
           </ScrollView>
         </View>
       )}
+
+      {/* Policy Selection Modal Overlay */}
+      <Modal
+        visible={policyModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setPolicyModalVisible(false)}
+      >
+        <View className="flex-1 justify-end bg-black/60">
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setPolicyModalVisible(false)}
+            className="absolute inset-0"
+          />
+          <View className="bg-slate-950 border-t border-slate-800 rounded-t-3xl max-h-[70%] p-6">
+            <View className="flex-row justify-between items-center mb-6 pb-2 border-b border-slate-900">
+              <Text className="text-white text-lg font-black">{policyModalTitle}</Text>
+              <TouchableOpacity
+                onPress={() => setPolicyModalVisible(false)}
+                className="p-1 bg-slate-900 rounded-full border border-slate-800"
+              >
+                <X color="#ffffff" size={18} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView className="space-y-2">
+              {policyModalOptions.map((opt) => {
+                let isSelected = false;
+                let id = '';
+                let label = '';
+                let description = '';
+
+                if (policyModalType === 'shipping') {
+                  id = opt.policyId;
+                  label = opt.name;
+                  description = opt.description || 'Shipping policy';
+                  isSelected = selectedShippingPolicy === id;
+                } else if (policyModalType === 'return') {
+                  id = opt.policyId;
+                  label = opt.name;
+                  description = opt.description || 'Return policy';
+                  isSelected = selectedReturnPolicy === id;
+                } else if (policyModalType === 'payment') {
+                  id = opt.policyId;
+                  label = opt.name;
+                  description = opt.description || 'Payment policy';
+                  isSelected = selectedPaymentPolicy === id;
+                } else if (policyModalType === 'location') {
+                  id = `${opt.merchantLocationKey}::${opt.postalCode || ""}`;
+                  label = opt.name;
+                  description = `ZIP: ${opt.postalCode || 'None'} - ${opt.merchantLocationKey}`;
+                  isSelected = itemLocationZip === id;
+                }
+
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() => {
+                      if (policyModalType === 'shipping') {
+                        setSelectedShippingPolicy(id);
+                      } else if (policyModalType === 'return') {
+                        setSelectedReturnPolicy(id);
+                      } else if (policyModalType === 'payment') {
+                        setSelectedPaymentPolicy(id);
+                      } else if (policyModalType === 'location') {
+                        setItemLocationZip(id);
+                      }
+                      setPolicyModalVisible(false);
+                    }}
+                    className={`p-4 rounded-xl flex-row justify-between items-center border mb-2 ${
+                      isSelected ? 'bg-sky-500/10 border-sky-500' : 'bg-slate-900/60 border-slate-800/60'
+                    }`}
+                  >
+                    <View className="flex-1 mr-4">
+                      <Text className={`text-sm font-bold ${isSelected ? 'text-sky-400' : 'text-white'}`}>{label}</Text>
+                      {description ? (
+                        <Text className="text-slate-400 text-xs mt-1" numberOfLines={1}>{description}</Text>
+                      ) : null}
+                    </View>
+                    {isSelected && <Check color="#0ea5e9" size={18} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Location Scanner Fullscreen Overlay */}
       {isScanningLocation && (
