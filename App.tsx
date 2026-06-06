@@ -1,32 +1,58 @@
-import React from 'react';
-import { createTRPCReact } from '@trpc/react-query';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ListingsScreen } from './src/screens/ListingsScreen';
-import CreateListingScreen from './src/screens/CreateListingScreen';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createTRPCReact } from '@trpc/react-query';
+import { httpBatchLink } from '@trpc/client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import superjson from 'superjson';
+
 import { AuthProvider } from './src/contexts/AuthContext';
+import { AppNavigator } from './src/navigation/AppNavigator';
 
-// Create tRPC React client
-export const trpc = createTRPCReact<any>() as any;
-
-const Stack = createNativeStackNavigator();
-const queryClient = new QueryClient();
+// Create the tRPC React instance using type casting to bypass router type constraints
+export const trpc = (createTRPCReact as any)();
 
 export default function App() {
-  const TRPCProvider = trpc.Provider;
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+      },
+    },
+  }));
+
+  const [trpcClient] = useState(() =>
+    trpc.createClient({
+      transformer: superjson,
+      links: [
+        httpBatchLink({
+          url: 'https://stocknestpro.com/api/trpc',
+          async headers() {
+            const token = await AsyncStorage.getItem('auth_token');
+            return {
+              Authorization: token ? `Bearer ${token}` : '',
+            };
+          },
+        }),
+      ],
+    })
+  );
+
   return (
-    <TRPCProvider client={{} as any} queryClient={queryClient}>
+    <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <NavigationContainer>
-            <Stack.Navigator initialRouteName="Listings">
-              <Stack.Screen name="Listings" component={ListingsScreen} />
-              <Stack.Screen name="CreateListing" component={CreateListingScreen} />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </AuthProvider>
+        <trpc.Provider client={trpcClient} queryClient={queryClient}>
+          <AuthProvider>
+            <NavigationContainer>
+              <AppNavigator />
+              <StatusBar style="auto" />
+            </NavigationContainer>
+          </AuthProvider>
+        </trpc.Provider>
       </QueryClientProvider>
-    </TRPCProvider>
+    </SafeAreaProvider>
   );
 }

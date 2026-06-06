@@ -1,33 +1,79 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface User {
+  id: string;
+  email: string;
+  name?: string | null;
+  role?: string;
+}
 
 interface AuthContextType {
-  user: {
-    id: string;
-    email: string;
-    name?: string;
-  } | null;
+  user: User | null;
+  token: string | null;
+  isLoading: boolean;
+  login: (token: string, user: User) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const value = {
-    user: { id: '1', email: 'test@example.com', name: 'Test User' },
-    logout: async () => {},
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadStoredAuth = async () => {
+      try {
+        const storedToken = await AsyncStorage.getItem('auth_token');
+        const storedUser = await AsyncStorage.getItem('auth_user');
+        if (storedToken && storedUser) {
+          setToken(storedToken);
+          setUser(JSON.parse(storedUser));
+        }
+      } catch (error) {
+        console.error('Failed to load stored auth session:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadStoredAuth();
+  }, []);
+
+  const login = async (newToken: string, newUser: User) => {
+    try {
+      setToken(newToken);
+      setUser(newUser);
+      await AsyncStorage.setItem('auth_token', newToken);
+      await AsyncStorage.setItem('auth_user', JSON.stringify(newUser));
+    } catch (error) {
+      console.error('Failed to save auth session during login:', error);
+    }
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+  const logout = async () => {
+    try {
+      setToken(null);
+      setUser(null);
+      await AsyncStorage.removeItem('auth_token');
+      await AsyncStorage.removeItem('auth_user');
+    } catch (error) {
+      console.error('Failed to clear auth session during logout:', error);
+    }
+  };
 
-export function useAuth() {
+  return (
+    <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    // Return a default value instead of throwing, to be robust in all environments
-    return {
-      user: { id: '1', email: 'test@example.com', name: 'Test User' },
-      logout: async () => {},
-    };
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};
