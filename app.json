@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "StockNestPro",
+    "slug": "stocknestpro-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stocknestpro.app",
+      "buildNumber": "40",
+      "infoPlist": {
+        "NSCameraUsageDescription": "StockNestPro needs camera access to scan physical inventory barcodes and location QR codes.",
+        "NSMicrophoneUsageDescription": "StockNestPro needs microphone access for video features.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.stocknestpro.app",
+      "versionCode": 40,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./src/assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2cb6dfb5-1ff7-4565-b25e-528d05bfd1e9"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "StockNestPro needs camera access to scan physical inventory barcodes and location QR codes.",
+          "microphonePermission": "StockNestPro needs microphone access for video features."
+        }
+      ],
+      "./withDisableDsym"
+    ]
+  }
+}
