@@ -427,7 +427,7 @@ export function ListingsScreen({ navigation }: any) {
 
   // Filter drafts based on search
   const filteredDrafts = useMemo(() => {
-    const drafts = draftsQuery.data ?? [];
+    const drafts = (draftsQuery.data ?? []).filter((d: any) => d.status !== 'active');
     if (!searchQuery.trim()) return drafts;
     const q = searchQuery.toLowerCase();
     return drafts.filter((d: any) => 

@@ -137,6 +137,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const cameraRef = useRef<any>(null);
+  const publishAfterSaveRef = useRef(false);
   // --- Location Scan State ---
   const [isScanningLocation, setIsScanningLocation] = useState(false);
 
@@ -150,6 +151,9 @@ export default function CreateListingScreen({ route, navigation }: any) {
   
   const saveDraftMutation = (trpc as any).listingWizard.saveDraft.useMutation({
     onSuccess: () => {
+      // If this save is part of a publish flow, suppress the draft-saved alert
+      // and navigation — the per-call onSuccess in handlePublishToEbay handles chaining.
+      if (publishAfterSaveRef.current) return;
       setLoading(false);
       setLoadingText(null);
       Alert.alert('Success', 'Listing draft created successfully!', [
@@ -165,6 +169,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
 
   const publishDraftMutation = (trpc as any).listingWizard.publish.useMutation({
     onSuccess: () => {
+      publishAfterSaveRef.current = false;
       setLoading(false);
       setLoadingText(null);
       Alert.alert(
@@ -174,6 +179,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
       );
     },
     onError: (err: any) => {
+      publishAfterSaveRef.current = false;
       setLoading(false);
       setLoadingText(null);
       const msg: string = err.message || '';
@@ -568,10 +574,12 @@ export default function CreateListingScreen({ route, navigation }: any) {
               publishDraftMutation.mutate({ draftId });
             } else {
               // New listing — save draft first, then publish using the returned id
+              publishAfterSaveRef.current = true;
               saveDraftMutation.mutate(buildDraftPayload(), {
                 onSuccess: (data: any) => {
                   const newDraftId = data?.id;
                   if (!newDraftId) {
+                    publishAfterSaveRef.current = false;
                     setLoading(false);
                     setLoadingText(null);
                     Alert.alert(
@@ -585,6 +593,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
                   publishDraftMutation.mutate({ draftId: newDraftId });
                 },
                 onError: (err: any) => {
+                  publishAfterSaveRef.current = false;
                   setLoading(false);
                   setLoadingText(null);
                   Alert.alert('Error', err.message || 'Failed to save listing draft before publishing.');
