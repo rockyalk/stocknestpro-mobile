@@ -8,10 +8,11 @@ import {
   TextInput,
   Alert,
   Vibration,
+  StyleSheet,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   QrCode,
-  Camera,
   Info,
   MapPin,
   CheckCircle2,
@@ -20,6 +21,7 @@ import {
   Package,
   ArrowRight,
   RefreshCw,
+  ScanLine,
 } from 'lucide-react-native';
 import { trpc } from '../../App';
 
@@ -33,6 +35,10 @@ export function ScanScreen() {
   // Active session state for moving/mapping
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [activeBox, setActiveBox] = useState<string | null>(null);
+
+  // Camera state
+  const [permission, requestPermission] = useCameraPermissions();
+  const [isCameraActive, setIsCameraActive] = useState(false);
 
   const scanMutation = (trpc as any).warehouse.scanLocationNode.useMutation();
   const moveMutation = (trpc as any).warehouse.moveItem.useMutation();
@@ -132,6 +138,26 @@ export function ScanScreen() {
     setLastAction(null);
   };
 
+  const startCamera = async () => {
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        Alert.alert(
+          'Camera Permission Required',
+          'Please enable camera access in your device settings to use the barcode scanner.',
+        );
+        return;
+      }
+    }
+    setIsCameraActive(true);
+  };
+
+  const handleBarcodeScanned = ({ data }: { data: string }) => {
+    // Immediately deactivate to prevent duplicate scans from one session
+    setIsCameraActive(false);
+    handleCodeScanned(data);
+  };
+
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerStyle={{ flexGrow: 1 }}>
       <View className="px-5 pt-14 pb-8 flex-1 justify-between">
@@ -155,20 +181,67 @@ export function ScanScreen() {
           )}
         </View>
 
-        {/* Camera / Scan View Simulation */}
-        <View className="bg-slate-950 aspect-square rounded-3xl overflow-hidden border border-slate-800 justify-center items-center mb-6 relative">
-          <View className="absolute inset-0 opacity-20 bg-[radial-gradient(#0284c7_1px,transparent_1px)] [background-size:16px_16px]" />
-          
-          {/* Laser guide line animation */}
-          <View className="absolute left-10 right-10 h-0.5 bg-sky-500 shadow shadow-sky-500 top-1/2" />
-
-          <QrCode color="#0284c7" size={80} strokeWidth={1.5} />
-          <Text className="text-sky-400 font-semibold text-xs uppercase tracking-wider mt-4">
-            Camera Scanner Active
-          </Text>
-          <Text className="text-slate-500 text-[11px] mt-1 px-8 text-center leading-relaxed">
-            Position QR code or barcode inside the frame to scan automatically
-          </Text>
+        {/* Camera / Scan View */}
+        <View className="aspect-square rounded-3xl overflow-hidden border border-slate-800 mb-6">
+          {isCameraActive ? (
+            /* LIVE CAMERA PREVIEW */
+            <View style={StyleSheet.absoluteFillObject}>
+              <CameraView
+                onBarcodeScanned={handleBarcodeScanned}
+                facing="back"
+                style={StyleSheet.absoluteFillObject}
+              />
+              {/* Targeting overlay */}
+              <View
+                style={StyleSheet.absoluteFillObject}
+                className="items-center justify-center"
+              >
+                {/* Corner brackets */}
+                <View className="w-56 h-56 relative items-center justify-center">
+                  {/* Top-left */}
+                  <View className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-sky-400 rounded-tl-lg" />
+                  {/* Top-right */}
+                  <View className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-sky-400 rounded-tr-lg" />
+                  {/* Bottom-left */}
+                  <View className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-sky-400 rounded-bl-lg" />
+                  {/* Bottom-right */}
+                  <View className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-sky-400 rounded-br-lg" />
+                  {/* Horizontal laser line */}
+                  <View className="absolute left-0 right-0 h-0.5 bg-sky-500 opacity-80" />
+                </View>
+                <Text className="text-sky-300 font-semibold text-xs uppercase tracking-wider mt-4 bg-black/50 px-3 py-1 rounded-full">
+                  Align code inside frame
+                </Text>
+              </View>
+              {/* Cancel button */}
+              <TouchableOpacity
+                className="absolute top-4 right-4 bg-black/60 px-4 py-2 rounded-full border border-slate-700"
+                onPress={() => setIsCameraActive(false)}
+              >
+                <Text className="text-white font-bold text-xs">Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            /* TAP-TO-ACTIVATE CARD */
+            <TouchableOpacity
+              className="flex-1 bg-slate-950 items-center justify-center"
+              onPress={startCamera}
+              activeOpacity={0.75}
+            >
+              <View className="absolute inset-0 opacity-20 bg-[radial-gradient(#0284c7_1px,transparent_1px)] [background-size:16px_16px]" />
+              <View className="items-center">
+                <View className="w-20 h-20 rounded-3xl bg-sky-500/10 border border-sky-500/30 items-center justify-center mb-4">
+                  <ScanLine color="#0284c7" size={40} strokeWidth={1.5} />
+                </View>
+                <Text className="text-white font-black text-base mb-1">
+                  Tap to Start Scanner
+                </Text>
+                <Text className="text-slate-400 text-xs text-center px-8 leading-relaxed">
+                  Opens live camera to scan QR codes and barcodes
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Session Status Bar */}
@@ -245,32 +318,34 @@ export function ScanScreen() {
           </View>
         )}
 
-        {/* Scan Simulation Fallback (Testing Panel) */}
-        <View className="bg-slate-950 border border-dashed border-slate-800 rounded-3xl p-5 mt-auto">
-          <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider text-center mb-4">
-            Scan Simulation Fallback (Testing Panel)
-          </Text>
-          <View className="flex-row justify-between flex-wrap">
-            <TouchableOpacity
-              className="w-[31%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center mb-2"
-              onPress={() => handleCodeScanned('SKU-IPHONE15-PRO-256')}
-            >
-              <Text className="text-sky-400 font-bold text-xs">Scan Item</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="w-[31%] bg-emerald-500/10 border border-emerald-500/20 py-3 rounded-xl items-center mb-2"
-              onPress={() => handleCodeScanned('BOX-A382')}
-            >
-              <Text className="text-emerald-400 font-bold text-xs">Scan Box</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
-              onPress={() => handleCodeScanned('LOC-WH1-R04-S2')}
-            >
-              <Text className="text-amber-400 font-bold text-xs">Scan Location</Text>
-            </TouchableOpacity>
+        {/* Scan Simulation Fallback — development only */}
+        {__DEV__ && (
+          <View className="bg-slate-950 border border-dashed border-slate-800 rounded-3xl p-5 mt-auto">
+            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider text-center mb-4">
+              Scan Simulation Fallback (Testing Panel)
+            </Text>
+            <View className="flex-row justify-between flex-wrap">
+              <TouchableOpacity
+                className="w-[31%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center mb-2"
+                onPress={() => handleCodeScanned('SKU-IPHONE15-PRO-256')}
+              >
+                <Text className="text-sky-400 font-bold text-xs">Scan Item</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="w-[31%] bg-emerald-500/10 border border-emerald-500/20 py-3 rounded-xl items-center mb-2"
+                onPress={() => handleCodeScanned('BOX-A382')}
+              >
+                <Text className="text-emerald-400 font-bold text-xs">Scan Box</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
+                onPress={() => handleCodeScanned('LOC-WH1-R04-S2')}
+              >
+                <Text className="text-amber-400 font-bold text-xs">Scan Location</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
       </View>
     </ScrollView>
   );
