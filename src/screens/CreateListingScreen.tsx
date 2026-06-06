@@ -163,6 +163,31 @@ export default function CreateListingScreen({ route, navigation }: any) {
     },
   });
 
+  const publishDraftMutation = (trpc as any).listingWizard.publish.useMutation({
+    onSuccess: () => {
+      setLoading(false);
+      setLoadingText(null);
+      Alert.alert(
+        'Published to eBay!',
+        'Your listing is now live on eBay.',
+        [{ text: 'OK', onPress: () => navigation.navigate('Listings') }]
+      );
+    },
+    onError: (err: any) => {
+      setLoading(false);
+      setLoadingText(null);
+      const msg: string = err.message || '';
+      if (msg.toLowerCase().includes('zip code') || msg.toLowerCase().includes('postal code')) {
+        Alert.alert(
+          'Missing Shipping ZIP Code',
+          'Please go back to Step 9 (Location) and select an eBay inventory location with a ZIP code.'
+        );
+      } else {
+        Alert.alert('Publish Failed', msg || 'Unable to publish to eBay. Your draft has been saved.');
+      }
+    },
+  });
+
   const searchSuggestionsQuery = (trpc as any).listingWizard.searchSuggestions.useQuery(
     { query: searchQuery },
     { enabled: searchQuery.length >= 2 }
@@ -467,6 +492,40 @@ export default function CreateListingScreen({ route, navigation }: any) {
   }, [sellingOptionsQuery.data, selectedPaymentPolicy, selectedReturnPolicy, selectedShippingPolicy, itemLocationZip]);
 
   // --- Form Actions ---
+
+  // Builds the draft payload from current form state.
+  // Used by both handleSaveDraft and handlePublishToEbay to avoid duplication.
+  const buildDraftPayload = (overrideId?: number) => ({
+    id: overrideId ?? draftId ?? undefined,
+    title,
+    description,
+    listingPrice: Number(price),
+    costPrice: costPrice ? Number(costPrice) : undefined,
+    quantity: Number(quantity),
+    condition,
+    categoryId,
+    categoryName,
+    categoryPath: categoryName,
+    warehouseId: selectedWarehouse || undefined,
+    locationNodeId: selectedLocationNode || undefined,
+    paymentPolicyId: selectedPaymentPolicy || undefined,
+    returnPolicyId: selectedReturnPolicy || undefined,
+    shippingPolicyId: selectedShippingPolicy || undefined,
+    itemLocationZip: itemLocationZip || undefined,
+    photos,
+    specifics: specifics.map((s) => ({
+      name: s.name,
+      value: s.value,
+      isRequired: s.isRequired,
+      isRecommended: s.isRecommended,
+    })),
+    packageWeight: packageWeight ? Number(packageWeight) : undefined,
+    packageLength: packageLength ? Number(packageLength) : undefined,
+    packageWidth: packageWidth ? Number(packageWidth) : undefined,
+    packageHeight: packageHeight ? Number(packageHeight) : undefined,
+    handlingTime: handlingTime ? Number(handlingTime) : 1,
+  });
+
   const handleSaveDraft = () => {
     if (!title.trim()) {
       Alert.alert('Required', 'Please enter a title for the listing.');
@@ -479,38 +538,63 @@ export default function CreateListingScreen({ route, navigation }: any) {
 
     setLoadingText('Saving listing draft...');
     setLoading(true);
-    const draftData: any = {
-      id: draftId || undefined,
-      title,
-      description,
-      listingPrice: Number(price),
-      costPrice: costPrice ? Number(costPrice) : undefined,
-      quantity: Number(quantity),
-      condition,
-      categoryId,
-      categoryName,
-      categoryPath: categoryName,
-      warehouseId: selectedWarehouse || undefined,
-      locationNodeId: selectedLocationNode || undefined,
-      paymentPolicyId: selectedPaymentPolicy || undefined,
-      returnPolicyId: selectedReturnPolicy || undefined,
-      shippingPolicyId: selectedShippingPolicy || undefined,
-      itemLocationZip: itemLocationZip || undefined,
-      photos,
-      specifics: specifics.map((s) => ({
-        name: s.name,
-        value: s.value,
-        isRequired: s.isRequired,
-        isRecommended: s.isRecommended,
-      })),
-      packageWeight: packageWeight ? Number(packageWeight) : undefined,
-      packageLength: packageLength ? Number(packageLength) : undefined,
-      packageWidth: packageWidth ? Number(packageWidth) : undefined,
-      packageHeight: packageHeight ? Number(packageHeight) : undefined,
-      handlingTime: handlingTime ? Number(handlingTime) : 1,
-    };
+    saveDraftMutation.mutate(buildDraftPayload());
+  };
 
-    saveDraftMutation.mutate(draftData);
+  const handlePublishToEbay = () => {
+    if (!title.trim()) {
+      Alert.alert('Required', 'Please enter a title for the listing.');
+      return;
+    }
+    if (!price.trim() || isNaN(Number(price))) {
+      Alert.alert('Required', 'Please enter a valid listing price.');
+      return;
+    }
+
+    Alert.alert(
+      'Publish to eBay',
+      `Publish "${title}" live to eBay? This will create an active listing immediately.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Publish Live',
+          style: 'default',
+          onPress: () => {
+            setLoadingText('Publishing to eBay...');
+            setLoading(true);
+
+            if (draftId) {
+              // Editing an existing draft — publish directly, no new draft created
+              publishDraftMutation.mutate({ draftId });
+            } else {
+              // New listing — save draft first, then publish using the returned id
+              saveDraftMutation.mutate(buildDraftPayload(), {
+                onSuccess: (data: any) => {
+                  const newDraftId = data?.id;
+                  if (!newDraftId) {
+                    setLoading(false);
+                    setLoadingText(null);
+                    Alert.alert(
+                      'Error',
+                      'Draft was saved but the ID was not returned. Please publish from the Listings screen.',
+                      [{ text: 'OK', onPress: () => navigation.navigate('Listings') }]
+                    );
+                    return;
+                  }
+                  setLoadingText('Publishing to eBay...');
+                  publishDraftMutation.mutate({ draftId: newDraftId });
+                },
+                onError: (err: any) => {
+                  setLoading(false);
+                  setLoadingText(null);
+                  Alert.alert('Error', err.message || 'Failed to save listing draft before publishing.');
+                },
+              });
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleBarcodeScanned = ({ data }: any) => {
@@ -1713,6 +1797,20 @@ export default function CreateListingScreen({ route, navigation }: any) {
                     <Check color="#ffffff" size={20} className="mr-2" />
                   )}
                   <Text className="text-white font-black text-base">Save Listing Draft</Text>
+                </TouchableOpacity>
+
+                {/* Publish to eBay */}
+                <TouchableOpacity
+                  onPress={handlePublishToEbay}
+                  disabled={loading}
+                  className="bg-sky-600 p-4 rounded-xl items-center active:scale-95 flex-row justify-center mt-3"
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#ffffff" className="mr-2" />
+                  ) : (
+                    <Tag color="#ffffff" size={20} className="mr-2" />
+                  )}
+                  <Text className="text-white font-black text-base">Publish to eBay</Text>
                 </TouchableOpacity>
               </View>
             )}
