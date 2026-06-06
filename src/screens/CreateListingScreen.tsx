@@ -1779,9 +1779,18 @@ export default function CreateListingScreen({ route, navigation }: any) {
                     </Text>
                   </View>
 
-                  <View className="flex-row justify-between pb-1 items-center">
-                    <Text className="text-slate-400 text-xs font-bold uppercase">Specifics Count</Text>
-                    <Text className="text-white text-sm font-bold">{specifics.filter((s) => s.value).length} aspects</Text>
+                  <View className="pt-1">
+                    <Text className="text-slate-400 text-xs font-bold uppercase mb-2">Item Specifics</Text>
+                    {specifics.filter((s) => s.value.trim()).length === 0 ? (
+                      <Text className="text-slate-500 text-xs italic">No item specifics entered</Text>
+                    ) : (
+                      specifics.filter((s) => s.value.trim()).map((spec, idx) => (
+                        <View key={idx} className="flex-row justify-between py-1">
+                          <Text className="text-slate-400 text-xs font-semibold flex-1">{spec.name}</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right ml-4" numberOfLines={2}>{spec.value}</Text>
+                        </View>
+                      ))
+                    )}
                   </View>
                 </View>
 
