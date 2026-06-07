@@ -319,7 +319,7 @@ export function ListingsScreen({ navigation }: any) {
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [scannedLocationCode, setScannedLocationCode] = useState('');
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [cameraPurpose, setCameraPurpose] = useState<'barcode' | 'location' | null>(null);
+  const [cameraPurpose, setCameraPurpose] = useState<'barcode' | 'location' | 'target_location' | null>(null);
 
   // Ref for focusing the location input
   const locationInputRef = useRef<TextInput>(null);
@@ -1335,8 +1335,60 @@ export function ListingsScreen({ navigation }: any) {
         visible={moveModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setMoveModalVisible(false)}
+        onRequestClose={() => {
+          if (isCameraActive && cameraPurpose === 'target_location') {
+            setIsCameraActive(false);
+            setCameraPurpose(null);
+          } else {
+            setMoveModalVisible(false);
+          }
+        }}
       >
+        {/* Camera overlay for scanning destination location */}
+        {isCameraActive && cameraPurpose === 'target_location' ? (
+          <View className="flex-1 bg-black">
+            <CameraView
+              onBarcodeScanned={({ data }) => {
+                setIsCameraActive(false);
+                setCameraPurpose(null);
+                setScannedTargetLocationCode(data);
+                resolveTargetLocation(data);
+              }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View className="flex-1 items-center justify-center">
+              <View className="w-72 h-72 border-4 border-sky-400 rounded-[36px] bg-transparent items-center justify-center shadow-2xl shadow-sky-500/30">
+                <View className="w-64 h-1 bg-sky-400 opacity-75 absolute rounded-full shadow-md shadow-sky-400" />
+              </View>
+              <Text className="text-white font-black text-sm mt-10 text-center bg-slate-950/90 border border-slate-800 px-6 py-3 rounded-full">
+                Scan Destination Location QR
+              </Text>
+              <TouchableOpacity
+                onPress={() => { setIsCameraActive(false); setCameraPurpose(null); }}
+                className="absolute top-12 right-6 p-3 bg-slate-900 border border-slate-800 rounded-full"
+              >
+                <X color="#ffffff" size={20} />
+              </TouchableOpacity>
+              {__DEV__ && (
+                <View className="absolute bottom-10 left-6 right-6 bg-slate-950/90 border border-slate-800 p-4 rounded-3xl">
+                  <Text className="text-slate-500 font-bold text-[10px] uppercase tracking-wider text-center mb-2">Simulation Panel</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setIsCameraActive(false);
+                      setCameraPurpose(null);
+                      const simCode = 'WH1-R2-S4-B13';
+                      setScannedTargetLocationCode(simCode);
+                      resolveTargetLocation(simCode);
+                    }}
+                    className="bg-slate-900 border border-slate-800 py-2.5 rounded-xl items-center justify-center"
+                  >
+                    <Text className="text-sky-400 font-bold text-xs">Simulate Location Scan</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        ) : (
         <View className="flex-1 justify-end bg-black/75">
           <View className="bg-slate-900 rounded-t-[36px] p-6 border-t border-slate-800 shadow-2xl max-h-[85%]">
             <View className="flex-row justify-between items-center pb-4 border-b border-slate-850 mb-5">
@@ -1414,6 +1466,7 @@ export function ListingsScreen({ navigation }: any) {
             )}
           </View>
         </View>
+        )}
       </Modal>
 
       {/* ────────────────── MAP TO LOCATION WORKFLOW MODAL ────────────────── */}

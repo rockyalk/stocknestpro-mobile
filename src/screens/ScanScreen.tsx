@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Alert,
   Vibration,
   StyleSheet,
+  Image,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
@@ -22,12 +23,79 @@ import {
   ArrowRight,
   RefreshCw,
   ScanLine,
+  Tag,
+  Hash,
+  Layers,
 } from 'lucide-react-native';
 import { trpc } from '../../App';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ResolvedItem {
+  id: number;
+  title: string;
+  sku: string;
+  quantity?: number;
+  condition?: string;
+  imageUrl?: string;
+  location?: string;
+}
+
+interface ResolvedLocation {
+  id: number;
+  code: string;
+  fullLocationCode?: string;
+  fullPath?: string;
+  name?: string;
+}
+
+type ScanResult =
+  | { type: 'item'; item: ResolvedItem }
+  | { type: 'location'; node: ResolvedLocation }
+  | { type: 'raw'; code: string; detectedAs: 'item' | 'box' | 'location' };
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Detect the semantic type of a scanned code.
+ * Handles:
+ *   snp://item/{id}     → 'item'
+ *   snp://location/{id} → 'location'
+ *   LOC-*, BIN-*, ROW-*, SHELF-*, AISLE-*, WH-*, SEC-*, ZONE-* → 'location'
+ *   BOX*, BX*, CARTON* → 'box'
+ *   everything else     → 'item'
+ */
+const detectType = (code: string): 'item' | 'box' | 'location' => {
+  const lower = code.toLowerCase();
+  // snp:// URI scheme
+  if (lower.startsWith('snp://item/')) return 'item';
+  if (lower.startsWith('snp://location/')) return 'location';
+
+  const upper = code.toUpperCase();
+  if (
+    upper.startsWith('LOC-') ||
+    upper.startsWith('BIN-') ||
+    upper.startsWith('ROW-') ||
+    upper.startsWith('SHELF-') ||
+    upper.startsWith('AISLE-') ||
+    upper.startsWith('WH-') ||
+    upper.startsWith('SEC-') ||
+    upper.startsWith('ZONE-')
+  ) {
+    return 'location';
+  }
+  if (upper.startsWith('BOX') || upper.startsWith('BX') || upper.startsWith('CARTON')) {
+    return 'box';
+  }
+  return 'item';
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function ScanScreen() {
   const [scannedCode, setScannedCode] = useState<string | null>(null);
   const [scannedType, setScannedType] = useState<'item' | 'box' | 'location' | null>(null);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
@@ -40,87 +108,84 @@ export function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isCameraActive, setIsCameraActive] = useState(false);
 
+  // Debounce guard to prevent duplicate scans
+  const scanLockRef = useRef(false);
+
   const scanMutation = (trpc as any).warehouse.scanLocationNode.useMutation();
   const moveMutation = (trpc as any).warehouse.moveItem.useMutation();
 
-  const detectType = (code: string): 'item' | 'box' | 'location' => {
-    const upper = code.toUpperCase();
-    if (
-      upper.startsWith('LOC-') ||
-      upper.startsWith('BIN-') ||
-      upper.startsWith('ROW-') ||
-      upper.startsWith('SHELF-') ||
-      upper.startsWith('AISLE-') ||
-      upper.startsWith('WH-') ||
-      upper.startsWith('SEC-') ||
-      upper.startsWith('ZONE-')
-    ) {
-      return 'location';
-    }
-    if (upper.startsWith('BOX') || upper.startsWith('BX') || upper.startsWith('CARTON')) {
-      return 'box';
-    }
-    return 'item';
-  };
-
   const handleCodeScanned = async (code: string) => {
-    if (!code) return;
+    if (!code || scanLockRef.current) return;
+    scanLockRef.current = true;
+
     setIsLoading(true);
     setScannedCode(code);
+    setScanResult(null);
     const type = detectType(code);
     setScannedType(type);
 
     try {
-      // Trigger haptic feedback
-      try {
-        Vibration.vibrate(100);
-      } catch (e) {}
+      // Haptic feedback
+      try { Vibration.vibrate(100); } catch (_) {}
 
       const response = await scanMutation.mutateAsync({
         code,
         format: 'QR_CODE',
       });
 
-      if (type === 'item') {
+      // ── Store enriched result ──────────────────────────────────────────────
+      if (response?.type === 'item' && response.item) {
+        setScanResult({ type: 'item', item: response.item });
         setActiveItem(code);
-        setLastAction(`Scanned item: ${code}`);
-      } else if (type === 'box') {
-        setActiveBox(code);
-        setLastAction(`Scanned box: ${code}`);
-        if (activeItem) {
-          // If we have an active item, map it to the box
-          await moveMutation.mutateAsync({
-            itemCode: activeItem,
-            destinationCode: code,
-          });
-          setLastAction(`Moved item ${activeItem} into box ${code}`);
-        }
-      } else if (type === 'location') {
-        setLastAction(`Scanned location: ${code}`);
+        setLastAction(`Scanned item: ${response.item.title || code}`);
+      } else if (response?.type === 'location' && response.node) {
+        setScanResult({ type: 'location', node: response.node });
+        setLastAction(`Scanned location: ${response.node.fullLocationCode || response.node.code || code}`);
         if (activeBox) {
-          // If we have an active box, map it to the location
-          await moveMutation.mutateAsync({
-            itemCode: activeBox,
-            destinationCode: code,
-          });
-          setLastAction(`Placed box ${activeBox} on location ${code}`);
+          await moveMutation.mutateAsync({ itemCode: activeBox, destinationCode: code });
+          setLastAction(`Placed box ${activeBox} on location ${response.node.code || code}`);
           setActiveBox(null);
           setActiveItem(null);
         } else if (activeItem) {
-          // If we only have an item, map it directly to the location
-          await moveMutation.mutateAsync({
-            itemCode: activeItem,
-            destinationCode: code,
-          });
-          setLastAction(`Mapped item ${activeItem} directly to location ${code}`);
+          await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
+          setLastAction(`Mapped item ${activeItem} directly to location ${response.node.code || code}`);
           setActiveItem(null);
+        }
+      } else {
+        // Fallback: server returned nothing useful — show raw code
+        setScanResult({ type: 'raw', code, detectedAs: type });
+        if (type === 'item') {
+          setActiveItem(code);
+          setLastAction(`Scanned item: ${code}`);
+        } else if (type === 'box') {
+          setActiveBox(code);
+          setLastAction(`Scanned box: ${code}`);
+          if (activeItem) {
+            await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
+            setLastAction(`Moved item ${activeItem} into box ${code}`);
+          }
+        } else {
+          setLastAction(`Scanned location: ${code}`);
+          if (activeBox) {
+            await moveMutation.mutateAsync({ itemCode: activeBox, destinationCode: code });
+            setLastAction(`Placed box ${activeBox} on location ${code}`);
+            setActiveBox(null);
+            setActiveItem(null);
+          } else if (activeItem) {
+            await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
+            setLastAction(`Mapped item ${activeItem} directly to location ${code}`);
+            setActiveItem(null);
+          }
         }
       }
     } catch (err: any) {
       console.error('Scan processing error:', err);
+      setScanResult({ type: 'raw', code, detectedAs: type });
       setLastAction(`Error: ${err?.message || 'Failed to process scan'}`);
     } finally {
       setIsLoading(false);
+      // Release debounce lock after a short delay
+      setTimeout(() => { scanLockRef.current = false; }, 1500);
     }
   };
 
@@ -135,7 +200,9 @@ export function ScanScreen() {
     setActiveBox(null);
     setScannedCode(null);
     setScannedType(null);
+    setScanResult(null);
     setLastAction(null);
+    scanLockRef.current = false;
   };
 
   const startCamera = async () => {
@@ -149,14 +216,146 @@ export function ScanScreen() {
         return;
       }
     }
+    scanLockRef.current = false;
     setIsCameraActive(true);
   };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    // Immediately deactivate to prevent duplicate scans from one session
+    // Immediately deactivate to prevent duplicate scans
     setIsCameraActive(false);
     handleCodeScanned(data);
   };
+
+  // ─── Render helpers ─────────────────────────────────────────────────────────
+
+  const renderScanResultCard = () => {
+    if (!scanResult) return null;
+
+    if (scanResult.type === 'item') {
+      const item = scanResult.item;
+      return (
+        <View className="bg-slate-950 border border-sky-500/20 rounded-2xl p-4 mb-6">
+          <View className="flex-row justify-between items-center mb-3">
+            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
+              Item Resolved
+            </Text>
+            <View className="bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
+              <Text className="text-sky-400 font-bold text-xs uppercase">Item</Text>
+            </View>
+          </View>
+          <View className="flex-row items-start gap-3">
+            {item.imageUrl ? (
+              <Image
+                source={{ uri: item.imageUrl }}
+                className="w-16 h-16 rounded-xl bg-slate-800"
+                resizeMode="contain"
+              />
+            ) : (
+              <View className="w-16 h-16 rounded-xl bg-slate-800 items-center justify-center">
+                <Package color="#475569" size={24} />
+              </View>
+            )}
+            <View className="flex-1 min-w-0">
+              <Text className="text-white font-bold text-sm leading-snug mb-1" numberOfLines={2}>
+                {item.title}
+              </Text>
+              <View className="flex-row items-center mb-1">
+                <Hash color="#64748b" size={11} />
+                <Text className="text-slate-400 font-mono text-xs ml-1">{item.sku}</Text>
+              </View>
+              {item.quantity !== undefined && (
+                <View className="flex-row items-center mb-1">
+                  <Layers color="#64748b" size={11} />
+                  <Text className="text-slate-400 text-xs ml-1">Qty: {item.quantity}</Text>
+                </View>
+              )}
+              {item.location && (
+                <View className="flex-row items-center">
+                  <MapPin color="#64748b" size={11} />
+                  <Text className="text-slate-400 text-xs ml-1 flex-1" numberOfLines={1}>
+                    {item.location}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+          {lastAction && (
+            <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800 mt-3">
+              <Info color="#0284c7" size={14} className="mt-0.5" />
+              <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    if (scanResult.type === 'location') {
+      const node = scanResult.node;
+      const displayCode = node.fullLocationCode || node.fullPath || node.code;
+      return (
+        <View className="bg-slate-950 border border-amber-500/20 rounded-2xl p-4 mb-6">
+          <View className="flex-row justify-between items-center mb-3">
+            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
+              Location Resolved
+            </Text>
+            <View className="bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+              <Text className="text-amber-400 font-bold text-xs uppercase">Location</Text>
+            </View>
+          </View>
+          <View className="flex-row items-center gap-3 mb-2">
+            <View className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 items-center justify-center">
+              <MapPin color="#f59e0b" size={22} />
+            </View>
+            <View className="flex-1 min-w-0">
+              <Text className="text-white font-black text-base font-mono" numberOfLines={1}>
+                {displayCode}
+              </Text>
+              {node.name && node.name !== displayCode && (
+                <Text className="text-slate-400 text-xs mt-0.5">{node.name}</Text>
+              )}
+            </View>
+          </View>
+          {lastAction && (
+            <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800 mt-2">
+              <Info color="#f59e0b" size={14} className="mt-0.5" />
+              <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    // Fallback: raw code display
+    const raw = scanResult;
+    const typeColor =
+      raw.detectedAs === 'location'
+        ? { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400', label: 'Location' }
+        : raw.detectedAs === 'box'
+        ? { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400', label: 'Box' }
+        : { bg: 'bg-sky-500/10', border: 'border-sky-500/20', text: 'text-sky-400', label: 'Item' };
+
+    return (
+      <View className="bg-slate-950 border border-slate-800 rounded-2xl p-4 mb-6">
+        <View className="flex-row justify-between items-center mb-2">
+          <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
+            Last Scan Result
+          </Text>
+          <View className={`${typeColor.bg} border ${typeColor.border} px-2 py-0.5 rounded-full`}>
+            <Text className={`${typeColor.text} font-bold text-xs uppercase`}>{typeColor.label}</Text>
+          </View>
+        </View>
+        <Text className="text-white font-mono font-bold text-base mb-2">{raw.code}</Text>
+        {lastAction && (
+          <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800">
+            <Info color="#0284c7" size={14} className="mt-0.5" />
+            <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // ─── Main render ─────────────────────────────────────────────────────────────
 
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerStyle={{ flexGrow: 1 }}>
@@ -198,13 +397,9 @@ export function ScanScreen() {
               >
                 {/* Corner brackets */}
                 <View className="w-56 h-56 relative items-center justify-center">
-                  {/* Top-left */}
                   <View className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-sky-400 rounded-tl-lg" />
-                  {/* Top-right */}
                   <View className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-sky-400 rounded-tr-lg" />
-                  {/* Bottom-left */}
                   <View className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-sky-400 rounded-bl-lg" />
-                  {/* Bottom-right */}
                   <View className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-sky-400 rounded-br-lg" />
                   {/* Horizontal laser line */}
                   <View className="absolute left-0 right-0 h-0.5 bg-sky-500 opacity-80" />
@@ -221,6 +416,12 @@ export function ScanScreen() {
                 <Text className="text-white font-bold text-xs">Cancel</Text>
               </TouchableOpacity>
             </View>
+          ) : isLoading ? (
+            /* LOADING STATE */
+            <View className="flex-1 bg-slate-950 items-center justify-center">
+              <ActivityIndicator size="large" color="#0284c7" />
+              <Text className="text-slate-400 text-xs font-semibold mt-3">Resolving scan…</Text>
+            </View>
           ) : (
             /* TAP-TO-ACTIVATE CARD */
             <TouchableOpacity
@@ -228,7 +429,6 @@ export function ScanScreen() {
               onPress={startCamera}
               activeOpacity={0.75}
             >
-              <View className="absolute inset-0 opacity-20 bg-[radial-gradient(#0284c7_1px,transparent_1px)] [background-size:16px_16px]" />
               <View className="items-center">
                 <View className="w-20 h-20 rounded-3xl bg-sky-500/10 border border-sky-500/30 items-center justify-center mb-4">
                   <ScanLine color="#0284c7" size={40} strokeWidth={1.5} />
@@ -268,8 +468,8 @@ export function ScanScreen() {
               )}
             </View>
             <Text className="text-slate-400 text-xs mt-1 leading-relaxed">
-              {activeItem && !activeBox && "👉 Scan a Box or Location to map this item."}
-              {activeBox && "👉 Scan a Location tag to store this box."}
+              {activeItem && !activeBox && '👉 Scan a Box or Location to map this item.'}
+              {activeBox && '👉 Scan a Location tag to store this box.'}
             </Text>
           </View>
         )}
@@ -293,30 +493,8 @@ export function ScanScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Scan Results / Actions */}
-        {scannedCode && (
-          <View className="bg-slate-950 border border-slate-800 rounded-2xl p-4 mb-6">
-            <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
-                Last Scan Result
-              </Text>
-              <Text className={`font-bold text-xs uppercase px-2 py-0.5 rounded-full ${
-                scannedType === 'location' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                scannedType === 'box' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-              }`}>
-                {scannedType}
-              </Text>
-            </View>
-            <Text className="text-white font-mono font-bold text-base mb-2">{scannedCode}</Text>
-            {lastAction && (
-              <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-                <Info color="#0284c7" size={16} className="mt-0.5" />
-                <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
-              </View>
-            )}
-          </View>
-        )}
+        {/* Enriched Scan Result Card */}
+        {scanResult && renderScanResultCard()}
 
         {/* Scan Simulation Fallback — development only */}
         {__DEV__ && (
@@ -332,6 +510,12 @@ export function ScanScreen() {
                 <Text className="text-sky-400 font-bold text-xs">Scan Item</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                className="w-[31%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center mb-2"
+                onPress={() => handleCodeScanned('snp://item/17')}
+              >
+                <Text className="text-sky-400 font-bold text-xs">snp:// Item</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 className="w-[31%] bg-emerald-500/10 border border-emerald-500/20 py-3 rounded-xl items-center mb-2"
                 onPress={() => handleCodeScanned('BOX-A382')}
               >
@@ -341,7 +525,13 @@ export function ScanScreen() {
                 className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
                 onPress={() => handleCodeScanned('LOC-WH1-R04-S2')}
               >
-                <Text className="text-amber-400 font-bold text-xs">Scan Location</Text>
+                <Text className="text-amber-400 font-bold text-xs">Scan Loc</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
+                onPress={() => handleCodeScanned('snp://location/42')}
+              >
+                <Text className="text-amber-400 font-bold text-xs">snp:// Loc</Text>
               </TouchableOpacity>
             </View>
           </View>
