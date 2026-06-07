@@ -29,7 +29,7 @@ import { trpc } from '../../App';
 // ─── Put-Away State Machine ───────────────────────────────────────────────────
 //
 //  idle           → scan snp://item/{id}  → item_scanned
-//  item_scanned   → scan snp://bin/{id}   → moving (auto-calls warehouse.moveItem)
+//  item_scanned   → scan snp://location/{id}  → moving (auto-calls warehouse.moveItem)
 //  moving         → success               → idle (ready for next item)
 //
 //  Any state → press "Finish Session"     → idle (clears everything)
@@ -48,7 +48,7 @@ interface ResolvedItem {
   locationLabel?: string;
 }
 
-interface ResolvedBin {
+interface ResolvedLocation {
   id: number;
   name: string;
   fullPath?: string | null;
@@ -63,7 +63,7 @@ export function ScanScreen() {
   const [activeItem, setActiveItem] = useState<ResolvedItem | null>(null);
   const [lastMoveResult, setLastMoveResult] = useState<{
     item: ResolvedItem;
-    bin: ResolvedBin;
+    location: ResolvedLocation;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -158,7 +158,7 @@ export function ScanScreen() {
         }
 
         const node = resolved.node;
-        const bin: ResolvedBin = {
+        const location: ResolvedLocation = {
           id: node.id,
           name: node.name,
           fullPath: node.fullPath,
@@ -167,16 +167,16 @@ export function ScanScreen() {
 
         // ── Step 2: Move immediately — no confirmation dialog ─────────────
         setPutAwayState('moving');
-        await moveMutation.mutateAsync({ itemId: activeItem.id, binId: bin.id });
+        await moveMutation.mutateAsync({ itemId: activeItem.id, locationNodeId: location.id });
 
         // ── Step 3: Success — show result, reset for next item ────────────
-        setLastMoveResult({ item: activeItem, bin });
+        setLastMoveResult({ item: activeItem, location });
         setActiveItem(null);
         setPutAwayState('idle');
         try { Vibration.vibrate([0, 60, 60, 60]); } catch (_) {}
 
       } else {
-        setErrorMessage('Unrecognised QR code. Expected snp://item/{id} or snp://bin/{id}.');
+        setErrorMessage('Unrecognised QR code. Expected snp://item/{id} or snp://location/{id}.');
       }
     } catch (err: any) {
       const msg = err?.message || err?.data?.message || 'Failed to process scan.';
@@ -193,8 +193,8 @@ export function ScanScreen() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const binDisplayLabel = (bin: ResolvedBin) =>
-    bin.fullLocationCode ?? bin.fullPath ?? bin.name;
+  const binDisplayLabel = (loc: ResolvedLocation) =>
+    loc.fullLocationCode ?? loc.fullPath ?? loc.name;
 
   return (
     <ScrollView
@@ -423,11 +423,11 @@ export function ScanScreen() {
                 <Text className="text-slate-400 font-mono text-[10px]">{lastMoveResult.item.sku}</Text>
               </View>
               <ArrowRight color="#475569" size={16} />
-              {/* Bin */}
+              {/* Location */}
               <View className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 flex-1">
-                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">Bin</Text>
+                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">Location</Text>
                 <Text className="text-white font-bold text-xs font-mono" numberOfLines={1}>
-                  {binDisplayLabel(lastMoveResult.bin)}
+                  {binDisplayLabel(lastMoveResult.location)}
                 </Text>
               </View>
             </View>
@@ -497,9 +497,9 @@ export function ScanScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 className="flex-1 min-w-[45%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center"
-                onPress={() => handleCodeScanned('snp://bin/997')}
+                onPress={() => handleCodeScanned('snp://location/997')}
               >
-                <Text className="text-amber-400 font-bold text-xs">snp://bin/997</Text>
+                <Text className="text-amber-400 font-bold text-xs">snp://location/997</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 className="flex-1 min-w-[45%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center"
