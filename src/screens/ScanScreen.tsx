@@ -14,22 +14,29 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   QrCode,
-  Info,
   MapPin,
   CheckCircle2,
-  ChevronRight,
-  Barcode,
   Package,
-  ArrowRight,
-  RefreshCw,
   ScanLine,
-  Tag,
   Hash,
   Layers,
+  ArrowRight,
+  XCircle,
+  LogOut,
 } from 'lucide-react-native';
 import { trpc } from '../../App';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Put-Away State Machine ───────────────────────────────────────────────────
+//
+//  idle           → scan snp://item/{id}  → item_scanned
+//  item_scanned   → scan snp://bin/{id}   → moving (auto-calls warehouse.moveItem)
+//  moving         → success               → idle (ready for next item)
+//
+//  Any state → press "Finish Session"     → idle (clears everything)
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PutAwayState = 'idle' | 'item_scanned' | 'moving';
 
 interface ResolvedItem {
   id: number;
@@ -37,173 +44,52 @@ interface ResolvedItem {
   sku: string;
   quantity?: number;
   condition?: string;
-  imageUrl?: string;
-  location?: string;
+  imageUrl?: string | null;
+  locationLabel?: string;
 }
 
-interface ResolvedLocation {
+interface ResolvedBin {
   id: number;
-  code: string;
-  fullLocationCode?: string;
-  fullPath?: string;
-  name?: string;
+  name: string;
+  fullPath?: string | null;
+  fullLocationCode?: string | null;
 }
-
-type ScanResult =
-  | { type: 'item'; item: ResolvedItem }
-  | { type: 'location'; node: ResolvedLocation }
-  | { type: 'raw'; code: string; detectedAs: 'item' | 'box' | 'location' };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Detect the semantic type of a scanned code.
- * Handles:
- *   snp://item/{id}     → 'item'
- *   snp://location/{id} → 'location'
- *   LOC-*, BIN-*, ROW-*, SHELF-*, AISLE-*, WH-*, SEC-*, ZONE-* → 'location'
- *   BOX*, BX*, CARTON* → 'box'
- *   everything else     → 'item'
- */
-const detectType = (code: string): 'item' | 'box' | 'location' => {
-  const lower = code.toLowerCase();
-  // snp:// URI scheme
-  if (lower.startsWith('snp://item/')) return 'item';
-  if (lower.startsWith('snp://location/')) return 'location';
-
-  const upper = code.toUpperCase();
-  if (
-    upper.startsWith('LOC-') ||
-    upper.startsWith('BIN-') ||
-    upper.startsWith('ROW-') ||
-    upper.startsWith('SHELF-') ||
-    upper.startsWith('AISLE-') ||
-    upper.startsWith('WH-') ||
-    upper.startsWith('SEC-') ||
-    upper.startsWith('ZONE-')
-  ) {
-    return 'location';
-  }
-  if (upper.startsWith('BOX') || upper.startsWith('BX') || upper.startsWith('CARTON')) {
-    return 'box';
-  }
-  return 'item';
-};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ScanScreen() {
-  const [scannedCode, setScannedCode] = useState<string | null>(null);
-  const [scannedType, setScannedType] = useState<'item' | 'box' | 'location' | null>(null);
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [manualCode, setManualCode] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastAction, setLastAction] = useState<string | null>(null);
+  // ── Put-Away State ─────────────────────────────────────────────────────────
+  const [putAwayState, setPutAwayState] = useState<PutAwayState>('idle');
+  const [activeItem, setActiveItem] = useState<ResolvedItem | null>(null);
+  const [lastMoveResult, setLastMoveResult] = useState<{
+    item: ResolvedItem;
+    bin: ResolvedBin;
+  } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Active session state for moving/mapping
-  const [activeItem, setActiveItem] = useState<string | null>(null);
-  const [activeBox, setActiveBox] = useState<string | null>(null);
-
-  // Camera state
+  // ── Camera ─────────────────────────────────────────────────────────────────
   const [permission, requestPermission] = useCameraPermissions();
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [manualCode, setManualCode] = useState('');
 
-  // Debounce guard to prevent duplicate scans
+  // Debounce guard — prevents duplicate scans from a single camera frame burst
   const scanLockRef = useRef(false);
 
-  const scanMutation = (trpc as any).warehouse.scanLocationNode.useMutation();
+  // ── tRPC ───────────────────────────────────────────────────────────────────
   const moveMutation = (trpc as any).warehouse.moveItem.useMutation();
 
-  const handleCodeScanned = async (code: string) => {
-    if (!code || scanLockRef.current) return;
-    scanLockRef.current = true;
+  // ── Session helpers ────────────────────────────────────────────────────────
 
-    setIsLoading(true);
-    setScannedCode(code);
-    setScanResult(null);
-    const type = detectType(code);
-    setScannedType(type);
-
-    try {
-      // Haptic feedback
-      try { Vibration.vibrate(100); } catch (_) {}
-
-      const response = await scanMutation.mutateAsync({
-        code,
-        format: 'QR_CODE',
-      });
-
-      // ── Store enriched result ──────────────────────────────────────────────
-      if (response?.type === 'item' && response.item) {
-        setScanResult({ type: 'item', item: response.item });
-        setActiveItem(code);
-        setLastAction(`Scanned item: ${response.item.title || code}`);
-      } else if (response?.type === 'location' && response.node) {
-        setScanResult({ type: 'location', node: response.node });
-        setLastAction(`Scanned location: ${response.node.fullLocationCode || response.node.code || code}`);
-        if (activeBox) {
-          await moveMutation.mutateAsync({ itemCode: activeBox, destinationCode: code });
-          setLastAction(`Placed box ${activeBox} on location ${response.node.code || code}`);
-          setActiveBox(null);
-          setActiveItem(null);
-        } else if (activeItem) {
-          await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
-          setLastAction(`Mapped item ${activeItem} directly to location ${response.node.code || code}`);
-          setActiveItem(null);
-        }
-      } else {
-        // Fallback: server returned nothing useful — show raw code
-        setScanResult({ type: 'raw', code, detectedAs: type });
-        if (type === 'item') {
-          setActiveItem(code);
-          setLastAction(`Scanned item: ${code}`);
-        } else if (type === 'box') {
-          setActiveBox(code);
-          setLastAction(`Scanned box: ${code}`);
-          if (activeItem) {
-            await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
-            setLastAction(`Moved item ${activeItem} into box ${code}`);
-          }
-        } else {
-          setLastAction(`Scanned location: ${code}`);
-          if (activeBox) {
-            await moveMutation.mutateAsync({ itemCode: activeBox, destinationCode: code });
-            setLastAction(`Placed box ${activeBox} on location ${code}`);
-            setActiveBox(null);
-            setActiveItem(null);
-          } else if (activeItem) {
-            await moveMutation.mutateAsync({ itemCode: activeItem, destinationCode: code });
-            setLastAction(`Mapped item ${activeItem} directly to location ${code}`);
-            setActiveItem(null);
-          }
-        }
-      }
-    } catch (err: any) {
-      console.error('Scan processing error:', err);
-      setScanResult({ type: 'raw', code, detectedAs: type });
-      setLastAction(`Error: ${err?.message || 'Failed to process scan'}`);
-    } finally {
-      setIsLoading(false);
-      // Release debounce lock after a short delay
-      setTimeout(() => { scanLockRef.current = false; }, 1500);
-    }
-  };
-
-  const handleManualSubmit = () => {
-    if (!manualCode.trim()) return;
-    handleCodeScanned(manualCode.trim());
-    setManualCode('');
-  };
-
-  const resetSession = () => {
+  const finishSession = () => {
+    setPutAwayState('idle');
     setActiveItem(null);
-    setActiveBox(null);
-    setScannedCode(null);
-    setScannedType(null);
-    setScanResult(null);
-    setLastAction(null);
+    setLastMoveResult(null);
+    setErrorMessage(null);
     scanLockRef.current = false;
   };
+
+  // ── Camera helpers ─────────────────────────────────────────────────────────
 
   const startCamera = async () => {
     if (!permission?.granted) {
@@ -211,7 +97,7 @@ export function ScanScreen() {
       if (!res.granted) {
         Alert.alert(
           'Camera Permission Required',
-          'Please enable camera access in your device settings to use the barcode scanner.',
+          'Please enable camera access in your device settings to use the scanner.',
         );
         return;
       }
@@ -221,169 +107,176 @@ export function ScanScreen() {
   };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    // Immediately deactivate to prevent duplicate scans
     setIsCameraActive(false);
     handleCodeScanned(data);
   };
 
-  // ─── Render helpers ─────────────────────────────────────────────────────────
-
-  const renderScanResultCard = () => {
-    if (!scanResult) return null;
-
-    if (scanResult.type === 'item') {
-      const item = scanResult.item;
-      return (
-        <View className="bg-slate-950 border border-sky-500/20 rounded-2xl p-4 mb-6">
-          <View className="flex-row justify-between items-center mb-3">
-            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
-              Item Resolved
-            </Text>
-            <View className="bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
-              <Text className="text-sky-400 font-bold text-xs uppercase">Item</Text>
-            </View>
-          </View>
-          <View className="flex-row items-start gap-3">
-            {item.imageUrl ? (
-              <Image
-                source={{ uri: item.imageUrl }}
-                className="w-16 h-16 rounded-xl bg-slate-800"
-                resizeMode="contain"
-              />
-            ) : (
-              <View className="w-16 h-16 rounded-xl bg-slate-800 items-center justify-center">
-                <Package color="#475569" size={24} />
-              </View>
-            )}
-            <View className="flex-1 min-w-0">
-              <Text className="text-white font-bold text-sm leading-snug mb-1" numberOfLines={2}>
-                {item.title}
-              </Text>
-              <View className="flex-row items-center mb-1">
-                <Hash color="#64748b" size={11} />
-                <Text className="text-slate-400 font-mono text-xs ml-1">{item.sku}</Text>
-              </View>
-              {item.quantity !== undefined && (
-                <View className="flex-row items-center mb-1">
-                  <Layers color="#64748b" size={11} />
-                  <Text className="text-slate-400 text-xs ml-1">Qty: {item.quantity}</Text>
-                </View>
-              )}
-              {item.location && (
-                <View className="flex-row items-center">
-                  <MapPin color="#64748b" size={11} />
-                  <Text className="text-slate-400 text-xs ml-1 flex-1" numberOfLines={1}>
-                    {item.location}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-          {lastAction && (
-            <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800 mt-3">
-              <Info color="#0284c7" size={14} className="mt-0.5" />
-              <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
-            </View>
-          )}
-        </View>
-      );
-    }
-
-    if (scanResult.type === 'location') {
-      const node = scanResult.node;
-      const displayCode = node.fullLocationCode || node.fullPath || node.code;
-      return (
-        <View className="bg-slate-950 border border-amber-500/20 rounded-2xl p-4 mb-6">
-          <View className="flex-row justify-between items-center mb-3">
-            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
-              Location Resolved
-            </Text>
-            <View className="bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-              <Text className="text-amber-400 font-bold text-xs uppercase">Location</Text>
-            </View>
-          </View>
-          <View className="flex-row items-center gap-3 mb-2">
-            <View className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 items-center justify-center">
-              <MapPin color="#f59e0b" size={22} />
-            </View>
-            <View className="flex-1 min-w-0">
-              <Text className="text-white font-black text-base font-mono" numberOfLines={1}>
-                {displayCode}
-              </Text>
-              {node.name && node.name !== displayCode && (
-                <Text className="text-slate-400 text-xs mt-0.5">{node.name}</Text>
-              )}
-            </View>
-          </View>
-          {lastAction && (
-            <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800 mt-2">
-              <Info color="#f59e0b" size={14} className="mt-0.5" />
-              <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
-            </View>
-          )}
-        </View>
-      );
-    }
-
-    // Fallback: raw code display
-    const raw = scanResult;
-    const typeColor =
-      raw.detectedAs === 'location'
-        ? { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400', label: 'Location' }
-        : raw.detectedAs === 'box'
-        ? { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400', label: 'Box' }
-        : { bg: 'bg-sky-500/10', border: 'border-sky-500/20', text: 'text-sky-400', label: 'Item' };
-
-    return (
-      <View className="bg-slate-950 border border-slate-800 rounded-2xl p-4 mb-6">
-        <View className="flex-row justify-between items-center mb-2">
-          <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider">
-            Last Scan Result
-          </Text>
-          <View className={`${typeColor.bg} border ${typeColor.border} px-2 py-0.5 rounded-full`}>
-            <Text className={`${typeColor.text} font-bold text-xs uppercase`}>{typeColor.label}</Text>
-          </View>
-        </View>
-        <Text className="text-white font-mono font-bold text-base mb-2">{raw.code}</Text>
-        {lastAction && (
-          <View className="flex-row items-start bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-            <Info color="#0284c7" size={14} className="mt-0.5" />
-            <Text className="text-slate-300 text-xs ml-2 flex-1 leading-relaxed">{lastAction}</Text>
-          </View>
-        )}
-      </View>
-    );
+  const handleManualSubmit = () => {
+    const code = manualCode.trim();
+    if (!code) return;
+    setManualCode('');
+    handleCodeScanned(code);
   };
 
-  // ─── Main render ─────────────────────────────────────────────────────────────
+  // ── Core scan handler ──────────────────────────────────────────────────────
+
+  const handleCodeScanned = async (code: string) => {
+    if (!code || scanLockRef.current) return;
+    scanLockRef.current = true;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      try { Vibration.vibrate(80); } catch (_) {}
+
+      // ── Step 1: Resolve via warehouse.scanCode ─────────────────────────────
+      // We call the REST/tRPC query directly via fetch to keep it simple
+      // (tRPC queries can't be called imperatively with useMutation, so we use
+      // the trpc client's query method via a mutation-style wrapper)
+      const resolved = await (trpc as any).warehouse.scanCode.query({ code });
+
+      if (resolved.type === 'item') {
+        // ── Item scanned ─────────────────────────────────────────────────────
+        const item = resolved.item;
+        setActiveItem({
+          id: item.id,
+          title: item.title,
+          sku: item.sku,
+          quantity: item.quantity,
+          condition: item.condition,
+          imageUrl: item.imageUrl,
+          locationLabel: item.locationLabel,
+        });
+        setPutAwayState('item_scanned');
+        setLastMoveResult(null);
+
+      } else if (resolved.type === 'bin') {
+        // ── Bin scanned ──────────────────────────────────────────────────────
+        if (putAwayState !== 'item_scanned' || !activeItem) {
+          setErrorMessage('Scan an item first before scanning a bin/location.');
+          return;
+        }
+
+        const node = resolved.node;
+        const bin: ResolvedBin = {
+          id: node.id,
+          name: node.name,
+          fullPath: node.fullPath,
+          fullLocationCode: node.fullLocationCode,
+        };
+
+        // ── Step 2: Move immediately — no confirmation dialog ─────────────
+        setPutAwayState('moving');
+        await moveMutation.mutateAsync({ itemId: activeItem.id, binId: bin.id });
+
+        // ── Step 3: Success — show result, reset for next item ────────────
+        setLastMoveResult({ item: activeItem, bin });
+        setActiveItem(null);
+        setPutAwayState('idle');
+        try { Vibration.vibrate([0, 60, 60, 60]); } catch (_) {}
+
+      } else {
+        setErrorMessage('Unrecognised QR code. Expected snp://item/{id} or snp://bin/{id}.');
+      }
+    } catch (err: any) {
+      const msg = err?.message || err?.data?.message || 'Failed to process scan.';
+      setErrorMessage(msg);
+      // If we were mid-move, return to item_scanned so operator can retry the bin
+      if (putAwayState === 'moving' && activeItem) {
+        setPutAwayState('item_scanned');
+      }
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => { scanLockRef.current = false; }, 1200);
+    }
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const binDisplayLabel = (bin: ResolvedBin) =>
+    bin.fullLocationCode ?? bin.fullPath ?? bin.name;
 
   return (
-    <ScrollView className="flex-1 bg-slate-900" contentContainerStyle={{ flexGrow: 1 }}>
-      <View className="px-5 pt-14 pb-8 flex-1 justify-between">
-        {/* Header */}
-        <View className="flex-row justify-between items-center mb-6">
-          <View>
+    <ScrollView
+      className="flex-1 bg-slate-900"
+      contentContainerStyle={{ flexGrow: 1 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View className="px-5 pt-14 pb-8 flex-1">
+
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <View className="flex-row justify-between items-start mb-6">
+          <View className="flex-1 mr-3">
             <Text className="text-2xl font-black text-white tracking-tight">
-              Warehouse Scanner
+              Put-Away Scanner
             </Text>
             <Text className="text-slate-400 text-xs mt-0.5">
-              Scan items, boxes, or location tags
+              {putAwayState === 'idle' && !lastMoveResult
+                ? 'Scan an item QR to begin'
+                : putAwayState === 'item_scanned'
+                ? 'Now scan the destination bin/location'
+                : putAwayState === 'moving'
+                ? 'Moving item…'
+                : 'Ready for next item'}
             </Text>
           </View>
-          {(activeItem || activeBox) && (
+          {/* Finish Session button — always visible when there's anything active */}
+          {(putAwayState !== 'idle' || lastMoveResult) && (
             <TouchableOpacity
-              className="px-3 py-1.5 bg-rose-500/20 border border-rose-500/30 rounded-full"
-              onPress={resetSession}
+              className="flex-row items-center px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl"
+              onPress={finishSession}
+              activeOpacity={0.7}
             >
-              <Text className="text-rose-400 font-bold text-xs">Reset</Text>
+              <LogOut color="#94a3b8" size={14} />
+              <Text className="text-slate-300 font-bold text-xs ml-1.5">Finish Session</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Camera / Scan View */}
-        <View className="aspect-square rounded-3xl overflow-hidden border border-slate-800 mb-6">
+        {/* ── State indicator pills ───────────────────────────────────────── */}
+        <View className="flex-row items-center mb-5 gap-2">
+          {/* Step 1 */}
+          <View className={`flex-row items-center px-3 py-1.5 rounded-full border ${
+            putAwayState === 'idle'
+              ? 'bg-sky-500/10 border-sky-500/30'
+              : 'bg-sky-500/20 border-sky-500/50'
+          }`}>
+            <QrCode color={putAwayState === 'idle' ? '#38bdf8' : '#0ea5e9'} size={12} />
+            <Text className={`font-bold text-xs ml-1.5 ${
+              putAwayState === 'idle' ? 'text-sky-400' : 'text-sky-300'
+            }`}>
+              {putAwayState === 'idle' ? 'Scan Item' : activeItem?.sku ?? 'Item ✓'}
+            </Text>
+          </View>
+
+          <ArrowRight color="#475569" size={14} />
+
+          {/* Step 2 */}
+          <View className={`flex-row items-center px-3 py-1.5 rounded-full border ${
+            putAwayState === 'item_scanned'
+              ? 'bg-amber-500/10 border-amber-500/30'
+              : putAwayState === 'moving'
+              ? 'bg-emerald-500/20 border-emerald-500/50'
+              : 'bg-slate-800 border-slate-700'
+          }`}>
+            <MapPin color={
+              putAwayState === 'item_scanned' ? '#fbbf24'
+              : putAwayState === 'moving' ? '#34d399'
+              : '#475569'
+            } size={12} />
+            <Text className={`font-bold text-xs ml-1.5 ${
+              putAwayState === 'item_scanned' ? 'text-amber-400'
+              : putAwayState === 'moving' ? 'text-emerald-400'
+              : 'text-slate-500'
+            }`}>
+              {putAwayState === 'moving' ? 'Moving…' : 'Scan Bin'}
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Camera / Scan View ──────────────────────────────────────────── */}
+        <View className="aspect-square rounded-3xl overflow-hidden border border-slate-800 mb-5">
           {isCameraActive ? (
-            /* LIVE CAMERA PREVIEW */
             <View style={StyleSheet.absoluteFillObject}>
               <CameraView
                 onBarcodeScanned={handleBarcodeScanned}
@@ -395,20 +288,17 @@ export function ScanScreen() {
                 style={StyleSheet.absoluteFillObject}
                 className="items-center justify-center"
               >
-                {/* Corner brackets */}
                 <View className="w-56 h-56 relative items-center justify-center">
                   <View className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-sky-400 rounded-tl-lg" />
                   <View className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-sky-400 rounded-tr-lg" />
                   <View className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-sky-400 rounded-bl-lg" />
                   <View className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-sky-400 rounded-br-lg" />
-                  {/* Horizontal laser line */}
                   <View className="absolute left-0 right-0 h-0.5 bg-sky-500 opacity-80" />
                 </View>
                 <Text className="text-sky-300 font-semibold text-xs uppercase tracking-wider mt-4 bg-black/50 px-3 py-1 rounded-full">
-                  Align code inside frame
+                  {putAwayState === 'idle' ? 'Scan item QR' : 'Scan bin/location QR'}
                 </Text>
               </View>
-              {/* Cancel button */}
               <TouchableOpacity
                 className="absolute top-4 right-4 bg-black/60 px-4 py-2 rounded-full border border-slate-700"
                 onPress={() => setIsCameraActive(false)}
@@ -417,70 +307,151 @@ export function ScanScreen() {
               </TouchableOpacity>
             </View>
           ) : isLoading ? (
-            /* LOADING STATE */
             <View className="flex-1 bg-slate-950 items-center justify-center">
               <ActivityIndicator size="large" color="#0284c7" />
-              <Text className="text-slate-400 text-xs font-semibold mt-3">Resolving scan…</Text>
+              <Text className="text-slate-400 text-xs font-semibold mt-3">
+                {putAwayState === 'moving' ? 'Moving item…' : 'Resolving scan…'}
+              </Text>
             </View>
           ) : (
-            /* TAP-TO-ACTIVATE CARD */
             <TouchableOpacity
               className="flex-1 bg-slate-950 items-center justify-center"
               onPress={startCamera}
               activeOpacity={0.75}
             >
               <View className="items-center">
-                <View className="w-20 h-20 rounded-3xl bg-sky-500/10 border border-sky-500/30 items-center justify-center mb-4">
-                  <ScanLine color="#0284c7" size={40} strokeWidth={1.5} />
+                <View className={`w-20 h-20 rounded-3xl border items-center justify-center mb-4 ${
+                  putAwayState === 'item_scanned'
+                    ? 'bg-amber-500/10 border-amber-500/30'
+                    : 'bg-sky-500/10 border-sky-500/30'
+                }`}>
+                  <ScanLine
+                    color={putAwayState === 'item_scanned' ? '#f59e0b' : '#0284c7'}
+                    size={40}
+                    strokeWidth={1.5}
+                  />
                 </View>
                 <Text className="text-white font-black text-base mb-1">
-                  Tap to Start Scanner
+                  {putAwayState === 'item_scanned' ? 'Tap to Scan Bin' : 'Tap to Scan Item'}
                 </Text>
                 <Text className="text-slate-400 text-xs text-center px-8 leading-relaxed">
-                  Opens live camera to scan QR codes and barcodes
+                  {putAwayState === 'item_scanned'
+                    ? 'Scan the destination bin or location QR'
+                    : 'Scan the item QR label to begin put-away'}
                 </Text>
               </View>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Session Status Bar */}
-        {(activeItem || activeBox) && (
-          <View className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 mb-6">
-            <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-3">
-              Active Routing Session
-            </Text>
-            <View className="flex-row items-center flex-wrap">
-              {activeItem && (
-                <View className="flex-row items-center bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2 mr-2 mb-2">
-                  <Barcode color="#0284c7" size={14} />
-                  <Text className="text-sky-400 font-bold text-xs ml-2">{activeItem}</Text>
-                </View>
-              )}
-              {activeItem && (activeBox || scannedType === 'location') && (
-                <ArrowRight color="#64748b" size={14} className="mr-2 mb-2" />
-              )}
-              {activeBox && (
-                <View className="flex-row items-center bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mr-2 mb-2">
-                  <Package color="#10b981" size={14} />
-                  <Text className="text-emerald-400 font-bold text-xs ml-2">{activeBox}</Text>
-                </View>
-              )}
+        {/* ── Active Item Card (shown while waiting for bin scan) ─────────── */}
+        {putAwayState === 'item_scanned' && activeItem && (
+          <View className="bg-slate-950 border border-sky-500/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row justify-between items-center mb-3">
+              <Text className="text-sky-400 font-bold text-xs uppercase tracking-wider">
+                Item Ready to Move
+              </Text>
+              <TouchableOpacity
+                onPress={() => { setActiveItem(null); setPutAwayState('idle'); setErrorMessage(null); }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <XCircle color="#64748b" size={18} />
+              </TouchableOpacity>
             </View>
-            <Text className="text-slate-400 text-xs mt-1 leading-relaxed">
-              {activeItem && !activeBox && '👉 Scan a Box or Location to map this item.'}
-              {activeBox && '👉 Scan a Location tag to store this box.'}
+            <View className="flex-row items-start gap-3">
+              {activeItem.imageUrl ? (
+                <Image
+                  source={{ uri: activeItem.imageUrl }}
+                  className="w-16 h-16 rounded-xl bg-slate-800"
+                  resizeMode="contain"
+                />
+              ) : (
+                <View className="w-16 h-16 rounded-xl bg-slate-800 items-center justify-center">
+                  <Package color="#475569" size={24} />
+                </View>
+              )}
+              <View className="flex-1 min-w-0">
+                <Text className="text-white font-bold text-sm leading-snug mb-1" numberOfLines={2}>
+                  {activeItem.title}
+                </Text>
+                <View className="flex-row items-center mb-1">
+                  <Hash color="#64748b" size={11} />
+                  <Text className="text-slate-400 font-mono text-xs ml-1">{activeItem.sku}</Text>
+                </View>
+                {activeItem.quantity !== undefined && (
+                  <View className="flex-row items-center mb-1">
+                    <Layers color="#64748b" size={11} />
+                    <Text className="text-slate-400 text-xs ml-1">Qty: {activeItem.quantity}</Text>
+                  </View>
+                )}
+                {activeItem.locationLabel && (
+                  <View className="flex-row items-center">
+                    <MapPin color="#64748b" size={11} />
+                    <Text className="text-slate-500 text-xs ml-1 flex-1" numberOfLines={1}>
+                      From: {activeItem.locationLabel}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+            {/* Prompt */}
+            <View className="mt-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5 flex-row items-center">
+              <MapPin color="#f59e0b" size={14} />
+              <Text className="text-amber-300 font-semibold text-xs ml-2">
+                Now scan the destination bin/location QR
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Success Card (last move result) ────────────────────────────── */}
+        {putAwayState === 'idle' && lastMoveResult && (
+          <View className="bg-slate-950 border border-emerald-500/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center mb-3">
+              <CheckCircle2 color="#10b981" size={16} />
+              <Text className="text-emerald-400 font-bold text-xs uppercase tracking-wider ml-2">
+                Item Moved Successfully
+              </Text>
+            </View>
+            <View className="flex-row items-center gap-2 flex-wrap">
+              {/* Item */}
+              <View className="bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2 flex-1">
+                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">Item</Text>
+                <Text className="text-white font-bold text-xs" numberOfLines={1}>
+                  {lastMoveResult.item.title}
+                </Text>
+                <Text className="text-slate-400 font-mono text-[10px]">{lastMoveResult.item.sku}</Text>
+              </View>
+              <ArrowRight color="#475569" size={16} />
+              {/* Bin */}
+              <View className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 flex-1">
+                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">Bin</Text>
+                <Text className="text-white font-bold text-xs font-mono" numberOfLines={1}>
+                  {binDisplayLabel(lastMoveResult.bin)}
+                </Text>
+              </View>
+            </View>
+            <Text className="text-slate-500 text-xs mt-3 text-center">
+              Scan next item to continue, or tap Finish Session when done.
             </Text>
           </View>
         )}
 
-        {/* Manual Code Input */}
-        <View className="flex-row items-center bg-slate-950 border border-slate-800 rounded-2xl px-3 h-14 mb-6">
+        {/* ── Error Message ───────────────────────────────────────────────── */}
+        {errorMessage && (
+          <View className="bg-rose-500/10 border border-rose-500/30 rounded-2xl px-4 py-3 mb-4 flex-row items-start">
+            <XCircle color="#f43f5e" size={16} className="mt-0.5" />
+            <Text className="text-rose-300 text-xs ml-2 flex-1 leading-relaxed">{errorMessage}</Text>
+          </View>
+        )}
+
+        {/* ── Manual Code Input ───────────────────────────────────────────── */}
+        <View className="flex-row items-center bg-slate-950 border border-slate-800 rounded-2xl px-3 h-14 mb-5">
           <TextInput
             className="flex-1 text-white font-medium ml-2"
-            placeholder="Type barcode/tag manually..."
+            placeholder="Type QR code manually (snp://item/17)…"
             placeholderTextColor="#475569"
-            autoCapitalize="characters"
+            autoCapitalize="none"
             value={manualCode}
             onChangeText={setManualCode}
             onSubmitEditing={handleManualSubmit}
@@ -493,49 +464,53 @@ export function ScanScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Enriched Scan Result Card */}
-        {scanResult && renderScanResultCard()}
+        {/* ── Finish Session Button (bottom, always accessible) ──────────── */}
+        {(putAwayState !== 'idle' || lastMoveResult) && (
+          <TouchableOpacity
+            className="flex-row items-center justify-center bg-slate-800 border border-slate-700 rounded-2xl py-4 mt-2"
+            onPress={finishSession}
+            activeOpacity={0.7}
+          >
+            <LogOut color="#94a3b8" size={16} />
+            <Text className="text-slate-300 font-bold text-sm ml-2">Finish Session</Text>
+          </TouchableOpacity>
+        )}
 
-        {/* Scan Simulation Fallback — development only */}
+        {/* ── Dev Simulation Panel ────────────────────────────────────────── */}
         {__DEV__ && (
-          <View className="bg-slate-950 border border-dashed border-slate-800 rounded-3xl p-5 mt-auto">
+          <View className="bg-slate-950 border border-dashed border-slate-800 rounded-3xl p-5 mt-6">
             <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider text-center mb-4">
-              Scan Simulation Fallback (Testing Panel)
+              Scan Simulation (Dev Only)
             </Text>
-            <View className="flex-row justify-between flex-wrap">
+            <View className="flex-row justify-between flex-wrap gap-2">
               <TouchableOpacity
-                className="w-[31%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center mb-2"
-                onPress={() => handleCodeScanned('SKU-IPHONE15-PRO-256')}
-              >
-                <Text className="text-sky-400 font-bold text-xs">Scan Item</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="w-[31%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center mb-2"
+                className="flex-1 min-w-[45%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center"
                 onPress={() => handleCodeScanned('snp://item/17')}
               >
-                <Text className="text-sky-400 font-bold text-xs">snp:// Item</Text>
+                <Text className="text-sky-400 font-bold text-xs">snp://item/17</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                className="w-[31%] bg-emerald-500/10 border border-emerald-500/20 py-3 rounded-xl items-center mb-2"
-                onPress={() => handleCodeScanned('BOX-A382')}
+                className="flex-1 min-w-[45%] bg-sky-500/10 border border-sky-500/20 py-3 rounded-xl items-center"
+                onPress={() => handleCodeScanned('snp://item/1')}
               >
-                <Text className="text-emerald-400 font-bold text-xs">Scan Box</Text>
+                <Text className="text-sky-400 font-bold text-xs">snp://item/1</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
-                onPress={() => handleCodeScanned('LOC-WH1-R04-S2')}
+                className="flex-1 min-w-[45%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center"
+                onPress={() => handleCodeScanned('snp://bin/997')}
               >
-                <Text className="text-amber-400 font-bold text-xs">Scan Loc</Text>
+                <Text className="text-amber-400 font-bold text-xs">snp://bin/997</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                className="w-[31%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center mb-2"
+                className="flex-1 min-w-[45%] bg-amber-500/10 border border-amber-500/20 py-3 rounded-xl items-center"
                 onPress={() => handleCodeScanned('snp://location/42')}
               >
-                <Text className="text-amber-400 font-bold text-xs">snp:// Loc</Text>
+                <Text className="text-amber-400 font-bold text-xs">snp://location/42</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
+
       </View>
     </ScrollView>
   );
