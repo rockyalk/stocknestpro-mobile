@@ -415,6 +415,21 @@ export default function CreateListingScreen({ route, navigation }: any) {
     }));
   };
 
+  const formatSuggestionMoney = (value: any, currency?: any) => {
+    if (value === undefined || value === null || value === '') return '';
+    const amount = String(value);
+    return currency ? `${String(currency).toUpperCase()} ${amount}` : amount;
+  };
+
+  const formatSuggestionStatus = (status: any) => {
+    if (!status) return '';
+    const normalized = String(status).trim();
+    const lower = normalized.toLowerCase();
+    if (lower === 'active' || lower === 'listed' || lower === 'live') return 'Listed / active';
+    if (lower === 'sold' || lower === 'completed') return 'Sold / completed';
+    return normalized;
+  };
+
   const handleApplySuggestionPreview = () => {
     if (!previewSuggestion || getEbaySuggestionDetailsQuery.isLoading) return;
 
@@ -1236,7 +1251,10 @@ export default function CreateListingScreen({ route, navigation }: any) {
                         {previewSuggestion.title || 'Untitled suggestion'}
                       </Text>
                       <Text className="text-emerald-400 font-black text-lg mt-2">
-                        ${getEbaySuggestionDetailsQuery.data?.listingPrice || previewSuggestion.price || '—'}
+                        {formatSuggestionMoney(
+                          getEbaySuggestionDetailsQuery.data?.listingPrice || previewSuggestion.price,
+                          getEbaySuggestionDetailsQuery.data?.listingPriceCurrency
+                        ) || '—'}
                       </Text>
                     </View>
                   </View>
@@ -1259,6 +1277,54 @@ export default function CreateListingScreen({ route, navigation }: any) {
                       <Text className="text-slate-500 text-xs">Only the search result summary is available for this suggestion.</Text>
                     </View>
                   ) : null}
+
+                  {(getEbaySuggestionDetailsQuery.data?.listingPrice ||
+                    previewSuggestion.price ||
+                    getEbaySuggestionDetailsQuery.data?.itemStatus ||
+                    getEbaySuggestionDetailsQuery.data?.shippingCost ||
+                    getEbaySuggestionDetailsQuery.data?.freeShipping !== undefined) && (
+                    <View className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-4">
+                      <Text className="text-slate-500 text-xs uppercase font-black mb-2">eBay Preview Details</Text>
+                      {getEbaySuggestionDetailsQuery.data?.itemStatus ? (
+                        <View className="flex-row justify-between border-b border-slate-800 py-2">
+                          <Text className="text-slate-400 text-xs flex-1 mr-3">Status</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right">
+                            {formatSuggestionStatus(getEbaySuggestionDetailsQuery.data.itemStatus)}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {(getEbaySuggestionDetailsQuery.data?.listingPrice || previewSuggestion.price) ? (
+                        <View className="flex-row justify-between border-b border-slate-800 py-2">
+                          <Text className="text-slate-400 text-xs flex-1 mr-3">Item price</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right">
+                            {formatSuggestionMoney(
+                              getEbaySuggestionDetailsQuery.data?.listingPrice || previewSuggestion.price,
+                              getEbaySuggestionDetailsQuery.data?.listingPriceCurrency
+                            )}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {getEbaySuggestionDetailsQuery.data?.shippingCost ? (
+                        <View className="flex-row justify-between border-b border-slate-800 py-2">
+                          <Text className="text-slate-400 text-xs flex-1 mr-3">Shipping cost</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right">
+                            {formatSuggestionMoney(
+                              getEbaySuggestionDetailsQuery.data.shippingCost,
+                              getEbaySuggestionDetailsQuery.data.shippingCostCurrency
+                            )}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {getEbaySuggestionDetailsQuery.data?.freeShipping !== undefined ? (
+                        <View className="flex-row justify-between py-2">
+                          <Text className="text-slate-400 text-xs flex-1 mr-3">Free shipping</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right">
+                            {getEbaySuggestionDetailsQuery.data.freeShipping ? 'Yes' : 'No'}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
 
                   <View className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-4">
                     <Text className="text-slate-500 text-xs uppercase font-black mb-1">Category</Text>
