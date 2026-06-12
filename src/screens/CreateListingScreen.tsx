@@ -65,6 +65,7 @@ const STEPS = [
 
 export default function CreateListingScreen({ route, navigation }: any) {
   const draftId = route?.params?.draftId;
+  const utils = (trpc as any).useUtils();
 
   const [method, setEntryMethod] = useState<EntryMethod>('none');
   const [permission, requestPermission] = useCameraPermissions();
@@ -129,7 +130,9 @@ export default function CreateListingScreen({ route, navigation }: any) {
   // --- Method 2: Search States ---
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchQueryResults] = useState<any[]>([]);
-  const [selectedSearchItem, setSelectedSearchItem] = useState<any>(null);
+  const [previewSuggestion, setPreviewSuggestion] = useState<any>(null);
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{ item: any; action: 'save' | 'publish' } | null>(null);
+  const [ignoredDuplicateId, setIgnoredDuplicateId] = useState<number | null>(null);
 
   // --- Method 3: AI States ---
   const [takingPhoto, setTakingPhoto] = useState(false);
@@ -148,6 +151,29 @@ export default function CreateListingScreen({ route, navigation }: any) {
     { id: draftId || 0 },
     { enabled: !!draftId }
   );
+
+  const duplicateInventoryQuery = (trpc as any).inventory.list.useQuery(
+    { search: title.trim(), page: 1, limit: 20 },
+    { enabled: !draftId && title.trim().length >= 2 }
+  );
+
+  const updateDuplicateQuantityMutation = (trpc as any).inventory.update.useMutation({
+    onSuccess: () => {
+      utils.inventory.list.invalidate();
+      utils.ebay.listListings.invalidate();
+      setLoading(false);
+      setLoadingText(null);
+      setDuplicatePrompt(null);
+      Alert.alert('Quantity Updated', 'Quantity was added to the existing inventory item.', [
+        { text: 'OK', onPress: () => navigation.navigate('Listings') },
+      ]);
+    },
+    onError: (err: any) => {
+      setLoading(false);
+      setLoadingText(null);
+      Alert.alert('Update Failed', err.message || 'Unable to add quantity to the existing item.');
+    },
+  });
   
   const saveDraftMutation = (trpc as any).listingWizard.saveDraft.useMutation({
     onSuccess: () => {
@@ -200,8 +226,8 @@ export default function CreateListingScreen({ route, navigation }: any) {
   );
 
   const getEbaySuggestionDetailsQuery = (trpc as any).listingWizard.getEbaySuggestionDetails.useQuery(
-    { itemId: selectedSearchItem?.id },
-    { enabled: !!selectedSearchItem }
+    { itemId: previewSuggestion?.id },
+    { enabled: !!previewSuggestion }
   );
 
   const analyzeListingImageMutation = (trpc as any).listingWizard.analyzeListingImage.useMutation({
@@ -381,26 +407,32 @@ export default function CreateListingScreen({ route, navigation }: any) {
     }
   }, [searchLocationsQuery.data]);
 
-  // Handle Suggestion details resolution
-  useEffect(() => {
-    if (getEbaySuggestionDetailsQuery.data) {
-      const data = getEbaySuggestionDetailsQuery.data;
-      setTitle(selectedSearchItem?.title || '');
-      setCategoryId(data.categoryId || '');
-      setCategoryName(data.categoryName || 'Uncategorized');
-      setPrice(String(data.listingPrice || ''));
-      setDescription(data.description || '');
-      if (data.specifics) {
-        const mappedSpecs = Object.entries(data.specifics).map(([k, v]: any) => ({
-          name: k,
-          value: Array.isArray(v) ? v.join(', ') : String(v),
-        }));
-        setSpecifics(mappedSpecs);
-      }
-      setEntryMethod('manual');
-      setCurrentStep(2);
-    }
-  }, [getEbaySuggestionDetailsQuery.data]);
+  const mapSuggestionSpecifics = (rawSpecifics: any): SpecificInput[] => {
+    if (!rawSpecifics) return [];
+    return Object.entries(rawSpecifics).map(([k, v]: any) => ({
+      name: k,
+      value: Array.isArray(v) ? v.join(', ') : String(v),
+    }));
+  };
+
+  const handleApplySuggestionPreview = () => {
+    if (!previewSuggestion || getEbaySuggestionDetailsQuery.isLoading) return;
+
+    const data = getEbaySuggestionDetailsQuery.data || {};
+    setTitle(previewSuggestion?.title || data.title || '');
+    setCategoryId(data.categoryId || previewSuggestion?.categoryId || '');
+    setCategoryName(data.categoryName || previewSuggestion?.categoryName || 'Uncategorized');
+    setPrice(String(data.listingPrice || previewSuggestion?.price || ''));
+    setDescription(data.description || '');
+    setSpecifics(mapSuggestionSpecifics(data.specifics));
+    setEntryMethod('manual');
+    setPreviewSuggestion(null);
+    setCurrentStep(2);
+  };
+
+  const handleCancelSuggestionPreview = () => {
+    setPreviewSuggestion(null);
+  };
 
   // Trigger search on typing query
   useEffect(() => {
@@ -499,6 +531,31 @@ export default function CreateListingScreen({ route, navigation }: any) {
 
   // --- Form Actions ---
 
+  const getRequestedQuantity = () => {
+    const parsedQuantity = Number(quantity);
+    return Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? Math.floor(parsedQuantity) : 1;
+  };
+
+  const getDuplicateCandidate = () => {
+    if (draftId) return null;
+    const normalizedTitle = title.trim().toLowerCase();
+    if (!normalizedTitle) return null;
+
+    const items = duplicateInventoryQuery.data?.items || [];
+    return items.find((item: any) => {
+      const itemTitle = String(item?.title || '').trim().toLowerCase();
+      return itemTitle === normalizedTitle && item?.id !== ignoredDuplicateId;
+    }) || null;
+  };
+
+  const requestDuplicateResolutionIfNeeded = (action: 'save' | 'publish') => {
+    const duplicateItem = getDuplicateCandidate();
+    if (!duplicateItem) return false;
+
+    setDuplicatePrompt({ item: duplicateItem, action });
+    return true;
+  };
+
   // Builds the draft payload from current form state.
   // Used by both handleSaveDraft and handlePublishToEbay to avoid duplication.
   const buildDraftPayload = (overrideId?: number) => ({
@@ -532,31 +589,13 @@ export default function CreateListingScreen({ route, navigation }: any) {
     handlingTime: handlingTime ? Number(handlingTime) : 1,
   });
 
-  const handleSaveDraft = () => {
-    if (!title.trim()) {
-      Alert.alert('Required', 'Please enter a title for the listing.');
-      return;
-    }
-    if (!price.trim() || isNaN(Number(price))) {
-      Alert.alert('Required', 'Please enter a valid listing price.');
-      return;
-    }
-
+  const performSaveDraft = () => {
     setLoadingText('Saving listing draft...');
     setLoading(true);
     saveDraftMutation.mutate(buildDraftPayload());
   };
 
-  const handlePublishToEbay = () => {
-    if (!title.trim()) {
-      Alert.alert('Required', 'Please enter a title for the listing.');
-      return;
-    }
-    if (!price.trim() || isNaN(Number(price))) {
-      Alert.alert('Required', 'Please enter a valid listing price.');
-      return;
-    }
-
+  const showPublishConfirmation = () => {
     Alert.alert(
       'Publish to eBay',
       `Publish "${title}" live to eBay? This will create an active listing immediately.`,
@@ -604,6 +643,63 @@ export default function CreateListingScreen({ route, navigation }: any) {
         },
       ]
     );
+  };
+
+  const handleSaveDraft = () => {
+    if (!title.trim()) {
+      Alert.alert('Required', 'Please enter a title for the listing.');
+      return;
+    }
+    if (!price.trim() || isNaN(Number(price))) {
+      Alert.alert('Required', 'Please enter a valid listing price.');
+      return;
+    }
+
+    if (requestDuplicateResolutionIfNeeded('save')) return;
+    performSaveDraft();
+  };
+
+  const handlePublishToEbay = () => {
+    if (!title.trim()) {
+      Alert.alert('Required', 'Please enter a title for the listing.');
+      return;
+    }
+    if (!price.trim() || isNaN(Number(price))) {
+      Alert.alert('Required', 'Please enter a valid listing price.');
+      return;
+    }
+
+    if (requestDuplicateResolutionIfNeeded('publish')) return;
+    showPublishConfirmation();
+  };
+
+  const handleAddQuantityToDuplicate = () => {
+    if (!duplicatePrompt?.item?.id) return;
+
+    const existingQuantity = Number(duplicatePrompt.item.quantity || 0);
+    const quantityToAdd = getRequestedQuantity();
+
+    setLoadingText('Adding quantity to existing item...');
+    setLoading(true);
+    updateDuplicateQuantityMutation.mutate({
+      id: duplicatePrompt.item.id,
+      quantity: existingQuantity + quantityToAdd,
+    });
+  };
+
+  const handleIgnoreDuplicateAndContinue = () => {
+    if (!duplicatePrompt) return;
+
+    const requestedAction = duplicatePrompt.action;
+    const ignoredId = duplicatePrompt.item?.id;
+    if (ignoredId) setIgnoredDuplicateId(ignoredId);
+    setDuplicatePrompt(null);
+
+    if (requestedAction === 'save') {
+      performSaveDraft();
+    } else {
+      showPublishConfirmation();
+    }
   };
 
   const handleBarcodeScanned = ({ data }: any) => {
@@ -1088,7 +1184,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
                   <TouchableOpacity
                     key={item.id}
                     onPress={() => {
-                      setSelectedSearchItem(item);
+                      setPreviewSuggestion(item);
                     }}
                     className="flex-row items-center bg-slate-900 border border-slate-800 p-3 rounded-xl mb-3 active:scale-98"
                   >
@@ -1116,14 +1212,101 @@ export default function CreateListingScreen({ route, navigation }: any) {
             </ScrollView>
           )}
 
-          {selectedSearchItem && (
-            <View className="absolute inset-0 bg-black/80 justify-center p-6">
-              <View className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <Text className="text-white text-lg font-black mb-4">Resolving Template Details</Text>
-                <ActivityIndicator size="large" color="#0ea5e9" className="my-6" />
-                <Text className="text-slate-400 text-sm text-center">
-                  Fetching item specifics, condition metrics, and recommended eBay category fields...
-                </Text>
+          {previewSuggestion && (
+            <View className="absolute inset-0 bg-black/80 justify-center p-4">
+              <View className="bg-slate-900 border border-slate-800 rounded-2xl max-h-[88%] overflow-hidden">
+                <View className="flex-row items-center justify-between p-4 border-b border-slate-800">
+                  <Text className="text-white text-lg font-black flex-1 mr-3">Suggestion Preview</Text>
+                  <TouchableOpacity onPress={handleCancelSuggestionPreview} className="p-2 bg-slate-800 rounded-full">
+                    <X color="#94a3b8" size={18} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView className="p-4" contentContainerStyle={{ paddingBottom: 12 }}>
+                  <View className="flex-row mb-4">
+                    {previewSuggestion.thumbnail ? (
+                      <Image source={{ uri: previewSuggestion.thumbnail }} className="w-24 h-24 rounded-xl mr-4 bg-slate-800" />
+                    ) : (
+                      <View className="w-24 h-24 bg-slate-800 rounded-xl justify-center items-center mr-4">
+                        <Package color="#64748b" size={32} />
+                      </View>
+                    )}
+                    <View className="flex-1">
+                      <Text className="text-white font-black text-base" numberOfLines={4}>
+                        {previewSuggestion.title || 'Untitled suggestion'}
+                      </Text>
+                      <Text className="text-emerald-400 font-black text-lg mt-2">
+                        ${getEbaySuggestionDetailsQuery.data?.listingPrice || previewSuggestion.price || '—'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {getEbaySuggestionDetailsQuery.isLoading ? (
+                    <View className="bg-slate-950 border border-slate-800 rounded-xl p-5 items-center mb-4">
+                      <ActivityIndicator size="large" color="#0ea5e9" />
+                      <Text className="text-slate-400 text-sm text-center mt-3">Loading eBay suggestion details...</Text>
+                    </View>
+                  ) : getEbaySuggestionDetailsQuery.isError ? (
+                    <View className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-4">
+                      <Text className="text-red-300 font-bold mb-1">Unable to load suggestion details</Text>
+                      <Text className="text-red-200 text-xs">
+                        {(getEbaySuggestionDetailsQuery.error as any)?.message || 'Please cancel and try this suggestion again.'}
+                      </Text>
+                    </View>
+                  ) : !getEbaySuggestionDetailsQuery.data ? (
+                    <View className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-4">
+                      <Text className="text-slate-300 font-bold mb-1">No additional details returned</Text>
+                      <Text className="text-slate-500 text-xs">Only the search result summary is available for this suggestion.</Text>
+                    </View>
+                  ) : null}
+
+                  <View className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-4">
+                    <Text className="text-slate-500 text-xs uppercase font-black mb-1">Category</Text>
+                    <Text className="text-white font-bold">
+                      {getEbaySuggestionDetailsQuery.data?.categoryName || previewSuggestion.categoryName || 'Uncategorized'}
+                    </Text>
+                    <Text className="text-slate-400 text-xs mt-1">
+                      ID: {getEbaySuggestionDetailsQuery.data?.categoryId || previewSuggestion.categoryId || 'Not provided'}
+                    </Text>
+                  </View>
+
+                  <View className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-4">
+                    <Text className="text-slate-500 text-xs uppercase font-black mb-2">Description Preview</Text>
+                    <Text className="text-slate-300 text-sm" numberOfLines={8}>
+                      {getEbaySuggestionDetailsQuery.data?.description || 'No description preview returned.'}
+                    </Text>
+                  </View>
+
+                  <View className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                    <Text className="text-slate-500 text-xs uppercase font-black mb-2">Fetched Item Specifics</Text>
+                    {mapSuggestionSpecifics(getEbaySuggestionDetailsQuery.data?.specifics).length > 0 ? (
+                      mapSuggestionSpecifics(getEbaySuggestionDetailsQuery.data?.specifics).slice(0, 20).map((spec, idx) => (
+                        <View key={`${spec.name}-${idx}`} className="flex-row justify-between border-b border-slate-800 py-2">
+                          <Text className="text-slate-400 text-xs flex-1 mr-3">{spec.name}</Text>
+                          <Text className="text-white text-xs font-bold flex-1 text-right">{spec.value}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text className="text-slate-500 text-xs">No fetched item specifics returned.</Text>
+                    )}
+                  </View>
+                </ScrollView>
+
+                <View className="flex-row gap-3 p-4 border-t border-slate-800">
+                  <TouchableOpacity
+                    onPress={handleCancelSuggestionPreview}
+                    className="flex-1 bg-slate-800 py-3 rounded-xl items-center"
+                  >
+                    <Text className="text-slate-200 font-black">Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleApplySuggestionPreview}
+                    disabled={getEbaySuggestionDetailsQuery.isLoading}
+                    className={`flex-1 py-3 rounded-xl items-center ${getEbaySuggestionDetailsQuery.isLoading ? 'bg-slate-700' : 'bg-sky-600'}`}
+                  >
+                    <Text className="text-white font-black">Apply</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           )}
@@ -1944,6 +2127,71 @@ export default function CreateListingScreen({ route, navigation }: any) {
                 );
               })}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Duplicate Resolution Modal Overlay */}
+      <Modal
+        visible={!!duplicatePrompt}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDuplicatePrompt(null)}
+      >
+        <View className="flex-1 justify-center bg-black/70 px-4">
+          <View className="bg-slate-950 border border-amber-500/40 rounded-3xl p-6">
+            <View className="flex-row items-start mb-4">
+              <View className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/30 items-center justify-center mr-3">
+                <AlertTriangle color="#f59e0b" size={20} />
+              </View>
+              <View className="flex-1">
+                <Text className="text-white text-lg font-black">Possible Duplicate Found</Text>
+                <Text className="text-slate-400 text-sm mt-1">
+                  This title matches an existing inventory item. Choose how to continue.
+                </Text>
+              </View>
+            </View>
+
+            <View className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 mb-5">
+              <Text className="text-slate-400 text-xs font-bold uppercase mb-1">Existing item</Text>
+              <Text className="text-white text-sm font-black" numberOfLines={2}>
+                {duplicatePrompt?.item?.title || 'Untitled inventory item'}
+              </Text>
+              <View className="flex-row flex-wrap gap-2 mt-3">
+                <Text className="text-slate-300 text-xs font-bold bg-slate-800 px-2 py-1 rounded-lg">
+                  Current Qty: {duplicatePrompt?.item?.quantity ?? 0}
+                </Text>
+                <Text className="text-amber-300 text-xs font-bold bg-amber-500/10 px-2 py-1 rounded-lg">
+                  Add Qty: {getRequestedQuantity()}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={handleAddQuantityToDuplicate}
+              disabled={updateDuplicateQuantityMutation.isLoading}
+              className={`p-4 rounded-xl items-center mb-3 ${
+                updateDuplicateQuantityMutation.isLoading ? 'bg-slate-800 opacity-70' : 'bg-emerald-600'
+              }`}
+            >
+              <Text className="text-white font-black text-sm">Add quantity to existing item</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleIgnoreDuplicateAndContinue}
+              disabled={updateDuplicateQuantityMutation.isLoading}
+              className="p-4 rounded-xl items-center mb-3 bg-slate-900 border border-slate-700"
+            >
+              <Text className="text-white font-bold text-sm">Ignore and continue as new listing</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setDuplicatePrompt(null)}
+              disabled={updateDuplicateQuantityMutation.isLoading}
+              className="p-3 rounded-xl items-center"
+            >
+              <Text className="text-slate-400 font-bold text-sm">Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
