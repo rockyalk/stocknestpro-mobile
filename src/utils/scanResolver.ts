@@ -11,14 +11,16 @@ export type SnpQrScanResult = {
 
 export type ScanResolverResult = RawScanResult | SnpQrScanResult;
 
+export type ScanCodeExecutor = (input: { code: string }) => Promise<any>;
+
 export const normalizeScanCode = (code: string) => String(code || '').trim();
 
 export const isSnpQrCode = (code: string) =>
   normalizeScanCode(code).toLowerCase().startsWith('snp://');
 
 export const resolveScanInput = async (
-  trpcClient: any,
   code: string,
+  scanCode: ScanCodeExecutor,
 ): Promise<ScanResolverResult> => {
   const rawCode = normalizeScanCode(code);
 
@@ -26,7 +28,7 @@ export const resolveScanInput = async (
     return { kind: 'raw', rawCode };
   }
 
-  const resolved = await trpcClient.warehouse.scanCode.query({ code: rawCode });
+  const resolved = await scanCode({ code: rawCode });
 
   return {
     kind: 'snp',

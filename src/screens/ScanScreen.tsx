@@ -78,6 +78,7 @@ export function ScanScreen() {
   const scanLockRef = useRef(false);
 
   // ── tRPC ───────────────────────────────────────────────────────────────────
+  const utils = (trpc as any).useUtils();
   const moveMutation = (trpc as any).warehouse.moveItem.useMutation();
 
   // ── Session helpers ────────────────────────────────────────────────────────
@@ -131,10 +132,11 @@ export function ScanScreen() {
       try { Vibration.vibrate(80); } catch (_) {}
 
       // ── Step 1: Resolve internal QR values via the shared scan resolver ─────
-      const scanResult = await resolveScanInput(trpc as any, code);
+      const scanCode = (input: { code: string }) => utils.warehouse.scanCode.fetch(input);
+      const scanResult = await resolveScanInput(code, scanCode);
       const resolved = scanResult.kind === 'snp'
         ? scanResult.resolved
-        : await (trpc as any).warehouse.scanCode.query({ code: scanResult.rawCode });
+        : await scanCode({ code: scanResult.rawCode });
 
       if (resolved.type === 'item') {
         // ── Item scanned ─────────────────────────────────────────────────────

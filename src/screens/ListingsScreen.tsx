@@ -754,7 +754,7 @@ export function ListingsScreen({ navigation }: any) {
     setCameraPurpose(null);
 
     try {
-      const scanResult = await resolveScanInput(trpc as any, data);
+      const scanResult = await resolveScanInput(data, (input) => utils.warehouse.scanCode.fetch(input));
 
       if (purpose === 'barcode') {
         if (scanResult.kind === 'snp') {

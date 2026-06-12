@@ -733,7 +733,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
     setIsScanningLocation(false);
 
     try {
-      const scanResult = await resolveScanInput(trpc as any, data);
+      const scanResult = await resolveScanInput(data, (input) => utils.warehouse.scanCode.fetch(input));
 
       if (scanResult.kind === 'snp') {
         const resolved = scanResult.resolved;
