@@ -55,6 +55,7 @@ import {
 } from 'lucide-react-native';
 import { trpc } from '../../App';
 import { useAuth } from '../contexts/AuthContext';
+import { resolveScanInput } from '../utils/scanResolver';
 
 export function ListingsScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
@@ -751,15 +752,64 @@ export function ListingsScreen({ navigation }: any) {
     setIsCameraActive(false);
     const purpose = cameraPurpose;
     setCameraPurpose(null);
-    if (purpose === 'barcode') {
-      setScannedBarcode(data);
-      lookupExistingItem(data);
-    } else if (purpose === 'location') {
-      setScannedLocationCode(data);
-      handleAutoMap(data); // Trigger auto-mapping instantly on scan!
-    } else if (purpose === 'target_location') {
-      setScannedTargetLocationCode(data);
-      resolveTargetLocation(data);
+
+    try {
+      const scanResult = await resolveScanInput(trpc as any, data);
+
+      if (purpose === 'barcode') {
+        if (scanResult.kind === 'snp') {
+          const resolved = scanResult.resolved;
+          if (resolved?.type === 'item' && resolved.item) {
+            const itemCode = resolved.item.sku || resolved.item.internalSku || String(resolved.item.id || scanResult.rawCode);
+            setScannedBarcode(itemCode);
+            setExistingInventoryItem(resolved.item);
+            return;
+          }
+
+          Alert.alert('Scan Failed', 'Scanned QR code is not an inventory item.');
+          return;
+        }
+
+        setScannedBarcode(scanResult.rawCode);
+        lookupExistingItem(scanResult.rawCode);
+      } else if (purpose === 'location') {
+        if (scanResult.kind === 'snp') {
+          const resolved = scanResult.resolved;
+          if (resolved?.type === 'bin' && resolved.node) {
+            const node = resolved.node;
+            const locationCode = node.fullLocationCode || node.fullPath || node.name || scanResult.rawCode;
+            setScannedLocationCode(locationCode);
+            setResolvedLocationNode(node);
+            handleAutoMap(locationCode); // Trigger auto-mapping instantly on scan!
+            return;
+          }
+
+          Alert.alert('Scan Failed', 'Scanned QR code is not a location.');
+          return;
+        }
+
+        setScannedLocationCode(scanResult.rawCode);
+        handleAutoMap(scanResult.rawCode); // Trigger auto-mapping instantly on scan!
+      } else if (purpose === 'target_location') {
+        if (scanResult.kind === 'snp') {
+          const resolved = scanResult.resolved;
+          if (resolved?.type === 'bin' && resolved.node) {
+            const node = resolved.node;
+            const locationCode = node.fullLocationCode || node.fullPath || node.name || scanResult.rawCode;
+            setScannedTargetLocationCode(locationCode);
+            setResolvedTargetLocationNode(node);
+            return;
+          }
+
+          Alert.alert('Scan Failed', 'Scanned QR code is not a location.');
+          return;
+        }
+
+        setScannedTargetLocationCode(scanResult.rawCode);
+        resolveTargetLocation(scanResult.rawCode);
+      }
+    } catch (err: any) {
+      Alert.alert('Scan Failed', err?.message || 'Unable to resolve scanned code.');
     }
   };
 

@@ -38,6 +38,7 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trpc } from '../../App';
+import { resolveScanInput } from '../utils/scanResolver';
 
 type EntryMethod = 'none' | 'barcode' | 'search' | 'ai' | 'manual';
 
@@ -79,6 +80,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
   const [selectedLocationNode, setSelectedLocationNode] = useState<number | null>(null);
   const [locationCode, setLocationCode] = useState('');
   const [resolvedLocation, setResolvedLocation] = useState<any>(null);
+  const [qrResolvedLocationCode, setQrResolvedLocationCode] = useState<string | null>(null);
 
   // --- Draft Form States ---
   const [title, setTitle] = useState('');
@@ -392,6 +394,10 @@ export default function CreateListingScreen({ route, navigation }: any) {
 
   // Handle location node resolution from query
   useEffect(() => {
+    if (qrResolvedLocationCode && locationCode === qrResolvedLocationCode) {
+      return;
+    }
+
     if (searchLocationsQuery.data && searchLocationsQuery.data.length > 0) {
       const match = searchLocationsQuery.data.find((loc: any) => loc.type === 'location');
       if (match) {
@@ -405,7 +411,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
       setResolvedLocation(null);
       setSelectedLocationNode(null);
     }
-  }, [searchLocationsQuery.data]);
+  }, [searchLocationsQuery.data, qrResolvedLocationCode, locationCode]);
 
   const mapSuggestionSpecifics = (rawSpecifics: any): SpecificInput[] => {
     if (!rawSpecifics) return [];
@@ -723,9 +729,39 @@ export default function CreateListingScreen({ route, navigation }: any) {
     handleBarcodeSearch(data);
   };
 
-  const handleLocationScanned = ({ data }: any) => {
+  const handleLocationScanned = async ({ data }: any) => {
     setIsScanningLocation(false);
-    setLocationCode(data);
+
+    try {
+      const scanResult = await resolveScanInput(trpc as any, data);
+
+      if (scanResult.kind === 'snp') {
+        const resolved = scanResult.resolved;
+        if (resolved?.type === 'bin' && resolved.node) {
+          const node = resolved.node;
+          const code = node.fullLocationCode || node.fullPath || node.name || scanResult.rawCode;
+          setLocationCode(code);
+          setQrResolvedLocationCode(code);
+          setResolvedLocation({
+            type: 'location',
+            id: node.id,
+            label: node.name,
+            code,
+            node,
+          });
+          setSelectedLocationNode(node.id);
+          return;
+        }
+
+        Alert.alert('Location Scan Failed', 'Scanned QR code is not a location.');
+        return;
+      }
+
+      setQrResolvedLocationCode(null);
+      setLocationCode(scanResult.rawCode);
+    } catch (err: any) {
+      Alert.alert('Location Scan Failed', err?.message || 'Unable to resolve scanned location.');
+    }
   };
 
   const startLocationScan = async () => {
@@ -1758,7 +1794,10 @@ export default function CreateListingScreen({ route, navigation }: any) {
                     <MapPin color="#64748b" size={16} className="mr-2" />
                     <TextInput
                       value={locationCode}
-                      onChangeText={setLocationCode}
+                      onChangeText={(value) => {
+                        setQrResolvedLocationCode(null);
+                        setLocationCode(value);
+                      }}
                       placeholder="e.g. WH1-R1-S2-B4"
                       placeholderTextColor="#64748b"
                       className="flex-1 text-white py-3 text-base"

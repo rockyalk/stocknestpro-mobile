@@ -25,6 +25,7 @@ import {
   LogOut,
 } from 'lucide-react-native';
 import { trpc } from '../../App';
+import { resolveScanInput } from '../utils/scanResolver';
 
 // ─── Put-Away State Machine ───────────────────────────────────────────────────
 //
@@ -129,11 +130,11 @@ export function ScanScreen() {
     try {
       try { Vibration.vibrate(80); } catch (_) {}
 
-      // ── Step 1: Resolve via warehouse.scanCode ─────────────────────────────
-      // We call the REST/tRPC query directly via fetch to keep it simple
-      // (tRPC queries can't be called imperatively with useMutation, so we use
-      // the trpc client's query method via a mutation-style wrapper)
-      const resolved = await (trpc as any).warehouse.scanCode.query({ code });
+      // ── Step 1: Resolve internal QR values via the shared scan resolver ─────
+      const scanResult = await resolveScanInput(trpc as any, code);
+      const resolved = scanResult.kind === 'snp'
+        ? scanResult.resolved
+        : await (trpc as any).warehouse.scanCode.query({ code: scanResult.rawCode });
 
       if (resolved.type === 'item') {
         // ── Item scanned ─────────────────────────────────────────────────────
