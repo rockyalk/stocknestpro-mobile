@@ -58,8 +58,8 @@ const STEPS = [
   { id: 6, name: 'Title' },
   { id: 7, name: 'Condition' },
   { id: 8, name: 'Pricing' },
-  { id: 9, name: 'Location' },
-  { id: 10, name: 'Policies' },
+  { id: 9, name: 'Policies' },
+  { id: 10, name: 'Location' },
   { id: 11, name: 'Description' },
   { id: 12, name: 'Review' },
 ];
@@ -738,16 +738,16 @@ export default function CreateListingScreen({ route, navigation }: any) {
     if (!itemLocationZip) {
       Alert.alert(
         'Location Required',
-        'Please go to Step 9 (Location) and select an eBay inventory location with a ZIP code. This is required by eBay.',
-        [{ text: 'Go to Step 9', onPress: () => setCurrentStep(9) }, { text: 'Cancel', style: 'cancel' }]
+        'Please go to Step 10 (Location) and select an eBay inventory location with a ZIP code. This is required by eBay.',
+        [{ text: 'Go to Step 10', onPress: () => setCurrentStep(10) }, { text: 'Cancel', style: 'cancel' }]
       );
       return;
     }
     if (!selectedShippingPolicy || !selectedReturnPolicy || !selectedPaymentPolicy) {
       Alert.alert(
         'Policies Required',
-        'Please go to Step 10 (Policies) and select your eBay Shipping, Return, and Payment policies. These are required by eBay to publish.',
-        [{ text: 'Go to Step 10', onPress: () => setCurrentStep(10) }, { text: 'Cancel', style: 'cancel' }]
+        'Please go to Step 9 (Policies) and select your eBay Shipping, Return, and Payment policies. These are required by eBay to publish.',
+        [{ text: 'Go to Step 9', onPress: () => setCurrentStep(9) }, { text: 'Cancel', style: 'cancel' }]
       );
       return;
     }
@@ -993,7 +993,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
     }
     if (currentStep === 6) return title.trim().length > 0;
     if (currentStep === 8) return price.trim().length > 0 && !isNaN(Number(price));
-    if (currentStep === 9) return !!selectedWarehouse && !!itemLocationZip;
+    if (currentStep === 10) return !!selectedWarehouse;
     return true;
   };
 
@@ -1011,12 +1011,8 @@ export default function CreateListingScreen({ route, navigation }: any) {
         Alert.alert('Title Required', 'Please enter a valid product title.');
       } else if (currentStep === 8) {
         Alert.alert('Price Required', 'Please enter a valid listing price.');
-      } else if (currentStep === 9) {
-        if (!selectedWarehouse) {
-          Alert.alert('Warehouse Required', 'Please select a warehouse before proceeding.');
-        } else {
-          Alert.alert('Location Required', 'Please select an eBay inventory location with a ZIP code. This is required by eBay to publish the listing.');
-        }
+      } else if (currentStep === 10) {
+        Alert.alert('Warehouse Required', 'Please select a warehouse before proceeding.');
       }
       return;
     }
@@ -1839,8 +1835,8 @@ export default function CreateListingScreen({ route, navigation }: any) {
               </View>
             )}
 
-            {/* STEP 9: Storage Location */}
-            {currentStep === 9 && (
+            {/* STEP 10: Storage Location */}
+            {currentStep === 10 && (
               <View>
                 <Text className="text-white text-lg font-black mb-2">Warehouse & Storage Location</Text>
                 <Text className="text-slate-400 text-sm mb-4">
@@ -1912,12 +1908,47 @@ export default function CreateListingScreen({ route, navigation }: any) {
                       className="flex-1 text-white py-3 ml-2 text-base"
                     />
                   </View>
+
+                  {/* eBay Shipping Origin Location — required for publish */}
+                  <Text className="text-slate-400 font-bold text-xs mt-4 mb-2 uppercase tracking-wider">eBay Shipping Origin Location</Text>
+                  {sellingOptionsQuery.isLoading ? (
+                    <View className="py-3 justify-center items-center">
+                      <ActivityIndicator size="small" color="#0ea5e9" />
+                      <Text className="text-slate-500 text-xs mt-1">Fetching eBay locations...</Text>
+                    </View>
+                  ) : inventoryLocations.length > 0 ? (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setPolicyModalTitle('Select Origin Location');
+                        setPolicyModalType('location');
+                        setPolicyModalOptions(inventoryLocations);
+                        setPolicyModalVisible(true);
+                      }}
+                      className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
+                    >
+                      <View className="flex-row items-center justify-between flex-1 mr-2">
+                        <Text className="text-white text-sm font-bold flex-1" numberOfLines={1}>
+                          {inventoryLocations.find((loc: any) => `${loc.merchantLocationKey}::${loc.postalCode || ""}` === itemLocationZip)?.name || inventoryLocations[0]?.name || 'Select Location'}
+                        </Text>
+                        <Text className="text-sky-400 text-xs font-black bg-sky-500/10 px-2 py-1 rounded ml-2">
+                          ZIP: {itemLocationZip ? (itemLocationZip.split('::')[1] || 'None') : 'None'}
+                        </Text>
+                      </View>
+                      <ChevronRight color="#64748b" size={16} />
+                    </TouchableOpacity>
+                  ) : (
+                    <View className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                      <Text className="text-amber-400 text-sm font-bold">
+                        No eBay locations found. Please configure on web first.
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
             )}
 
-            {/* STEP 10: eBay Policies */}
-            {currentStep === 10 && (
+            {/* STEP 9: eBay Policies */}
+            {currentStep === 9 && (
               <View>
                 <Text className="text-white text-lg font-black mb-2">eBay Business Policies</Text>
                 <Text className="text-slate-400 text-sm mb-4">
@@ -1988,37 +2019,6 @@ export default function CreateListingScreen({ route, navigation }: any) {
                       </TouchableOpacity>
                     </View>
 
-                    {/* Shipping Origin Location / ZIP */}
-                    <View>
-                      <Text className="text-slate-400 font-bold text-xs uppercase tracking-wider mb-2">eBay Shipping Origin Location</Text>
-                      {inventoryLocations.length > 0 ? (
-                        <TouchableOpacity
-                          onPress={() => {
-                            setPolicyModalTitle('Select Origin Location');
-                            setPolicyModalType('location');
-                            setPolicyModalOptions(inventoryLocations);
-                            setPolicyModalVisible(true);
-                          }}
-                          className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex-row justify-between items-center active:scale-[0.99]"
-                        >
-                          <View className="flex-row items-center justify-between flex-1 mr-2">
-                            <Text className="text-white text-sm font-bold flex-1" numberOfLines={1}>
-                              {inventoryLocations.find((loc) => `${loc.merchantLocationKey}::${loc.postalCode || ""}` === itemLocationZip)?.name || inventoryLocations[0].name}
-                            </Text>
-                            <Text className="text-sky-400 text-xs font-black bg-sky-500/10 px-2 py-1 rounded ml-2">
-                              ZIP: {itemLocationZip.split("::")[1] || "None"}
-                            </Text>
-                          </View>
-                          <ChevronRight color="#64748b" size={16} />
-                        </TouchableOpacity>
-                      ) : (
-                        <View className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
-                          <Text className="text-amber-400 text-sm font-bold">
-                            No eBay locations found. Please configure on web.
-                          </Text>
-                        </View>
-                      )}
-                    </View>
                   </View>
                 )}
               </View>
