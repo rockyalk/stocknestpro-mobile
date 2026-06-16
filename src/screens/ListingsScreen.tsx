@@ -16,7 +16,6 @@ import {
   Linking,
   Vibration
 } from 'react-native';
-import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { 
   Tag, 
@@ -226,22 +225,15 @@ export function ListingsScreen({ navigation }: any) {
   });
 
   const playSound = async (type: 'success' | 'error') => {
+    // Sound feedback is provided via Vibration only — no remote network dependency.
+    // Vibration patterns already handle success (single) vs error (triple) feedback.
     try {
-      const url = type === 'success' 
-        ? 'https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav' 
-        : 'https://assets.mixkit.co/active_storage/sfx/2955/2955-84.wav';
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true, volume: 1.0 }
-      );
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
-    } catch (error) {
-      console.error('Failed to play sound:', error);
-    }
+      if (type === 'success') {
+        Vibration.vibrate(80);
+      } else {
+        Vibration.vibrate([0, 80, 80, 80]);
+      }
+    } catch (_) {}
   };
 
   const mapListingMutation = (trpc as any).ebay.mapListingToItem.useMutation({
@@ -420,39 +412,6 @@ export function ListingsScreen({ navigation }: any) {
           l.status === 'scheduled' || 
           (l.startDate && new Date(l.startDate) > new Date())
         );
-        // Mock a couple of scheduled listings if empty for rich UI representation
-        if (scheduled.length === 0 && !searchQuery.trim()) {
-          return [
-            {
-              id: 9901,
-              ebayListingId: "SCH-391024",
-              title: "Retro Gaming Console HDMI 4K - 10,000+ Built-in Classic Games",
-              price: "79.99",
-              quantity: 15,
-              status: "scheduled",
-              sku: "CON-RETRO-4K",
-              views: 0,
-              watchers: 0,
-              soldQuantity: 0,
-              startDate: new Date(Date.now() + 86400000 * 2).toISOString(), // 2 days later
-              imageUrl: "https://images.unsplash.com/photo-1531525645387-7f14be1bdbbd?w=150&auto=format&fit=crop&q=60"
-            },
-            {
-              id: 9902,
-              ebayListingId: "SCH-391025",
-              title: "Mechanical Keyboard Hot-Swappable RGB - Blue Switches",
-              price: "45.50",
-              quantity: 8,
-              status: "scheduled",
-              sku: "KEY-MECH-RGB",
-              views: 0,
-              watchers: 0,
-              soldQuantity: 0,
-              startDate: new Date(Date.now() + 86400000 * 3).toISOString(), // 3 days later
-              imageUrl: "https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=150&auto=format&fit=crop&q=60"
-            }
-          ];
-        }
         return scheduled;
       case 'ended':
         return filteredListings.filter((l: any) => l.status === 'ended' || l.status === 'sold');
@@ -878,24 +837,17 @@ export function ListingsScreen({ navigation }: any) {
       if (response && response.type === 'location') {
         setResolvedLocationNode(response.node);
       } else {
-        // Fallback for scanning robustness
-        setResolvedLocationNode({
-          id: 9999,
-          code: code.toUpperCase(),
-          name: `Location ${code.toUpperCase()}`,
-          warehouseId: selectedWarehouseId || 1,
-          fullLocationCode: code.toUpperCase()
-        });
+        // Code was scanned but not found in the warehouse database — do not inject a fake node.
+        setResolvedLocationNode(null);
+        Alert.alert(
+          'Location Not Found',
+          `The scanned code "${code}" does not match any warehouse location. Please scan a valid location QR or type the correct code.`
+        );
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to resolve location code:', e);
-      setResolvedLocationNode({
-        id: 9999,
-        code: code.toUpperCase(),
-        name: `Location ${code.toUpperCase()}`,
-        warehouseId: selectedWarehouseId || 1,
-        fullLocationCode: code.toUpperCase()
-      });
+      setResolvedLocationNode(null);
+      Alert.alert('Scan Error', e?.message || 'Unable to resolve location. Please try again.');
     } finally {
       setResolvingLocation(false);
     }
@@ -915,7 +867,7 @@ export function ListingsScreen({ navigation }: any) {
         Alert.alert('Error', 'Please resolve a warehouse location node first.');
         return;
       }
-      createAndMapMutation.mutate({
+        createAndMapMutation.mutate({
         listingId: selectedListing.ebayListingId,
         title: selectedListing.title,
         sku: scannedBarcode.trim() || selectedListing.sku || undefined,
@@ -923,7 +875,7 @@ export function ListingsScreen({ navigation }: any) {
         quantity: parseInt(selectedListing.quantity, 10) || 0,
         imageUrl: selectedListing.imageUrl || undefined,
         warehouseId: selectedWarehouseId || resolvedLocationNode.warehouseId || 1,
-        locationNodeId: resolvedLocationNode.id === 9999 ? 1 : resolvedLocationNode.id,
+        locationNodeId: resolvedLocationNode.id,
         condition: 'used'
       });
     }
@@ -1590,24 +1542,7 @@ export function ListingsScreen({ navigation }: any) {
                   <X color="#ffffff" size={20} />
                 </TouchableOpacity>
 
-                {/* Simulated Scans for testing mapping workflow */}
-                <View className="absolute bottom-10 left-6 right-6 bg-slate-950/90 border border-slate-800 p-4 rounded-3xl">
-                  <Text className="text-slate-500 font-bold text-[10px] uppercase tracking-wider text-center mb-2">Simulation Panel</Text>
-                  <TouchableOpacity 
-                    onPress={() => {
-                      if (cameraPurpose === 'barcode') {
-                        handleCameraScan({ type: 'barcode', data: 'SKU-BOX-HD-001' });
-                      } else if (cameraPurpose === 'location') {
-                        handleCameraScan({ type: 'qr', data: 'WH1-R2-S4-B12' });
-                      } else if (cameraPurpose === 'target_location') {
-                        handleCameraScan({ type: 'qr', data: 'WH1-R2-S4-B13' });
-                      }
-                    }}
-                    className="bg-slate-900 border border-slate-800 py-2.5 rounded-xl items-center justify-center"
-                  >
-                    <Text className="text-sky-400 font-bold text-xs">Simulate Scan Match</Text>
-                  </TouchableOpacity>
-                </View>
+
               </View>
             </View>
           ) : (
@@ -1631,11 +1566,17 @@ export function ListingsScreen({ navigation }: any) {
                 <ScrollView showsVerticalScrollIndicator={false} className="space-y-4">
                   {/* Selected Listing Card */}
                   <View className="flex-row bg-slate-950 p-3 rounded-2xl border border-slate-850 items-center gap-3">
-                    <Image 
-                      source={{ uri: selectedListing.imageUrl || 'https://via.placeholder.com/100' }} 
-                      className="w-12 h-12 rounded-xl bg-white border border-slate-800"
-                      resizeMode="contain"
-                    />
+                    {selectedListing.imageUrl ? (
+                      <Image 
+                        source={{ uri: selectedListing.imageUrl }} 
+                        className="w-12 h-12 rounded-xl bg-white border border-slate-800"
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <View className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 items-center justify-center">
+                        <Package color="#64748b" size={22} />
+                      </View>
+                    )}
                     <View className="flex-1 min-w-0">
                       <Text className="text-white font-bold text-xs truncate" numberOfLines={1}>{selectedListing.title}</Text>
                       <View className="flex-row items-center gap-2 mt-1">

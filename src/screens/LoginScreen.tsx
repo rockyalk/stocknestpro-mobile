@@ -102,6 +102,8 @@ export function LoginScreen() {
               placeholderTextColor="#94a3b8"
               keyboardType="email-address"
               autoCapitalize="none"
+              returnKeyType="next"
+              blurOnSubmit={false}
               value={email}
               onChangeText={setEmail}
             />
@@ -118,6 +120,8 @@ export function LoginScreen() {
               placeholderTextColor="#94a3b8"
               secureTextEntry
               autoCapitalize="none"
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
               value={password}
               onChangeText={setPassword}
             />

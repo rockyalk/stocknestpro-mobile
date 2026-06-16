@@ -47,8 +47,9 @@ export function MoreScreen() {
   };
 
   const data = dashboardQuery.data || {
-    lastEbaySync: 'Just now',
-    printAgentStatus: 'online',
+    lastEbaySync: undefined,
+    printAgentStatus: undefined,
+    shippoStatus: undefined,
   };
 
   const isSyncing = syncMutation.isLoading;
@@ -101,8 +102,22 @@ export function MoreScreen() {
               </Text>
             </View>
             <View className="flex-row items-center">
-              <View className="w-2 h-2 rounded-full bg-emerald-500 mr-2" />
-              <Text className="text-emerald-600 font-bold text-sm">OK</Text>
+              <View className={`w-2 h-2 rounded-full mr-2 ${
+                data.lastEbaySync === 'OK' || data.lastEbaySync === 'Synced'
+                  ? 'bg-emerald-500'
+                  : data.lastEbaySync === 'Error' || data.lastEbaySync === 'Failed'
+                    ? 'bg-rose-500'
+                    : 'bg-amber-400'
+              }`} />
+              <Text className={`font-bold text-sm ${
+                data.lastEbaySync === 'OK' || data.lastEbaySync === 'Synced'
+                  ? 'text-emerald-600'
+                  : data.lastEbaySync === 'Error' || data.lastEbaySync === 'Failed'
+                    ? 'text-rose-600'
+                    : 'text-amber-600'
+              }`}>
+                {data.lastEbaySync || 'Unknown'}
+              </Text>
             </View>
           </View>
 
@@ -115,8 +130,18 @@ export function MoreScreen() {
               </Text>
             </View>
             <View className="flex-row items-center">
-              <View className="w-2 h-2 rounded-full bg-emerald-500 mr-2" />
-              <Text className="text-emerald-600 font-bold text-sm">Active</Text>
+              <View className={`w-2 h-2 rounded-full mr-2 ${
+                data.shippoStatus === 'active' ? 'bg-emerald-500'
+                : data.shippoStatus === 'error' ? 'bg-rose-500'
+                : 'bg-amber-400'
+              }`} />
+              <Text className={`font-bold text-sm capitalize ${
+                data.shippoStatus === 'active' ? 'text-emerald-600'
+                : data.shippoStatus === 'error' ? 'text-rose-600'
+                : 'text-slate-500'
+              }`}>
+                {data.shippoStatus ? data.shippoStatus.charAt(0).toUpperCase() + data.shippoStatus.slice(1) : 'Unknown'}
+              </Text>
             </View>
           </View>
 

@@ -43,8 +43,8 @@ export function HomeScreen({ navigation }: any) {
     lowStockAlerts: 0,
     salesToday: 0,
     salesLast30Days: 0,
-    lastEbaySync: 'OK',
-    printAgentStatus: 'online',
+    lastEbaySync: undefined,
+    printAgentStatus: undefined,
   };
 
   const isLoading = dashboardQuery.isLoading;
@@ -154,17 +154,17 @@ export function HomeScreen({ navigation }: any) {
               {/* Print Queue Card */}
               <TouchableOpacity
                 className="w-[48%] bg-white p-5 rounded-3xl border border-slate-100 mb-4 shadow-sm active:bg-slate-50"
-                onPress={() => navigation.navigate('More')}
-              >
-                <View className="bg-amber-100 p-3 rounded-2xl w-12 h-12 items-center justify-center mb-4">
-                  <AlertTriangle color="#d97706" size={24} />
-                </View>
-                <Text className="text-slate-900 font-bold text-base">
-                  Print Queue
-                </Text>
-                <Text className="text-slate-400 text-xs mt-1">
-                  Thermal & label jobs
-                </Text>
+              onPress={() => navigation.navigate('Listings', { tab: 'active' })}
+            >
+              <View className="bg-amber-100 p-3 rounded-2xl w-12 h-12 items-center justify-center mb-4">
+                <AlertTriangle color="#d97706" size={24} />
+              </View>
+              <Text className="text-slate-900 font-bold text-base">
+                Print Queue
+              </Text>
+              <Text className="text-slate-400 text-xs mt-1">
+                Thermal & label jobs
+              </Text>
               </TouchableOpacity>
             </View>
 
@@ -225,9 +225,21 @@ export function HomeScreen({ navigation }: any) {
                   eBay Sync Status
                 </Text>
                 <View className="flex-row items-center">
-                  <View className="w-2 h-2 rounded-full bg-emerald-500 mr-2" />
-                  <Text className="text-emerald-600 font-bold text-sm">
-                    {data.lastEbaySync || 'OK'}
+                  <View className={`w-2 h-2 rounded-full mr-2 ${
+                    data.lastEbaySync === 'OK' || data.lastEbaySync === 'Synced'
+                      ? 'bg-emerald-500'
+                      : data.lastEbaySync === 'Error' || data.lastEbaySync === 'Failed'
+                        ? 'bg-rose-500'
+                        : 'bg-amber-400'
+                  }`} />
+                  <Text className={`font-bold text-sm ${
+                    data.lastEbaySync === 'OK' || data.lastEbaySync === 'Synced'
+                      ? 'text-emerald-600'
+                      : data.lastEbaySync === 'Error' || data.lastEbaySync === 'Failed'
+                        ? 'text-rose-600'
+                        : 'text-amber-600'
+                  }`}>
+                    {data.lastEbaySync || 'Unknown'}
                   </Text>
                 </View>
               </View>

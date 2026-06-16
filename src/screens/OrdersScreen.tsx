@@ -190,9 +190,9 @@ export function OrdersScreen() {
                     </Text>
                   </View>
                 ) : (
-                  pickQueue.map((item: any, index: number) => (
+                  pickQueue.map((item: any) => (
                     <View
-                      key={index}
+                      key={item.id ?? item.orderId ?? item.sku ?? Math.random()}
                       className="bg-white p-5 rounded-3xl border border-slate-100 mb-4 shadow-sm"
                     >
                       <View className="flex-row justify-between items-start mb-3">
@@ -239,9 +239,9 @@ export function OrdersScreen() {
                     </Text>
                   </View>
                 ) : (
-                  packOrders.map((order: any, index: number) => (
+                  packOrders.map((order: any) => (
                     <View
-                      key={index}
+                      key={order.id ?? order.orderId ?? Math.random()}
                       className="bg-white p-5 rounded-3xl border border-slate-100 mb-4 shadow-sm"
                     >
                       <View className="flex-row justify-between items-center mb-3">
@@ -291,9 +291,9 @@ export function OrdersScreen() {
                     </Text>
                   </View>
                 ) : (
-                  shippedOrders.map((order: any, index: number) => (
+                  shippedOrders.map((order: any) => (
                     <View
-                      key={index}
+                      key={order.id ?? order.orderId ?? Math.random()}
                       className="bg-white p-5 rounded-3xl border border-slate-100 mb-4 shadow-sm"
                     >
                       <View className="flex-row justify-between items-center mb-3">

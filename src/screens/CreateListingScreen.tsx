@@ -731,6 +731,26 @@ export default function CreateListingScreen({ route, navigation }: any) {
       Alert.alert('Required', 'Please enter a valid listing price.');
       return;
     }
+    if (!categoryId) {
+      Alert.alert('Category Required', 'Please select an eBay category (Step 3) before publishing.');
+      return;
+    }
+    if (!itemLocationZip) {
+      Alert.alert(
+        'Location Required',
+        'Please go to Step 9 (Location) and select an eBay inventory location with a ZIP code. This is required by eBay.',
+        [{ text: 'Go to Step 9', onPress: () => setCurrentStep(9) }, { text: 'Cancel', style: 'cancel' }]
+      );
+      return;
+    }
+    if (!selectedShippingPolicy || !selectedReturnPolicy || !selectedPaymentPolicy) {
+      Alert.alert(
+        'Policies Required',
+        'Please go to Step 10 (Policies) and select your eBay Shipping, Return, and Payment policies. These are required by eBay to publish.',
+        [{ text: 'Go to Step 10', onPress: () => setCurrentStep(10) }, { text: 'Cancel', style: 'cancel' }]
+      );
+      return;
+    }
 
     if (requestDuplicateResolutionIfNeeded('publish')) return;
     showPublishConfirmation();
@@ -973,7 +993,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
     }
     if (currentStep === 6) return title.trim().length > 0;
     if (currentStep === 8) return price.trim().length > 0 && !isNaN(Number(price));
-    if (currentStep === 9) return !!selectedWarehouse;
+    if (currentStep === 9) return !!selectedWarehouse && !!itemLocationZip;
     return true;
   };
 
@@ -991,6 +1011,12 @@ export default function CreateListingScreen({ route, navigation }: any) {
         Alert.alert('Title Required', 'Please enter a valid product title.');
       } else if (currentStep === 8) {
         Alert.alert('Price Required', 'Please enter a valid listing price.');
+      } else if (currentStep === 9) {
+        if (!selectedWarehouse) {
+          Alert.alert('Warehouse Required', 'Please select a warehouse before proceeding.');
+        } else {
+          Alert.alert('Location Required', 'Please select an eBay inventory location with a ZIP code. This is required by eBay to publish the listing.');
+        }
       }
       return;
     }
@@ -2035,7 +2061,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
               <View className="space-y-6">
                 <Text className="text-white text-lg font-black mb-2">Review Listing Details</Text>
                 <Text className="text-slate-400 text-sm mb-4">
-                  Double check your details before saving this draft to the database.
+                  Review your listing details. You can save as a draft or publish directly to eBay.
                 </Text>
 
                 {/* Photo summary */}
