@@ -210,14 +210,56 @@ export default function CreateListingScreen({ route, navigation }: any) {
       publishAfterSaveRef.current = false;
       setLoading(false);
       setLoadingText(null);
-      const msg: string = err.message || '';
-      if (msg.toLowerCase().includes('zip code') || msg.toLowerCase().includes('postal code')) {
+
+      // Safely extract the error message — the backend may throw a raw JS error
+      // (e.g. "Cannot read properties of undefined (reading 'maxEbayListing')") which
+      // means the plan/subscription data for this account is not yet initialised in
+      // the database.  We catch that specific pattern and show a friendly message
+      // so the employee is not left with a confusing crash string.
+      const rawMsg: string =
+        err?.message ||
+        err?.data?.message ||
+        err?.shape?.message ||
+        '';
+
+      const isPlanLimitError =
+        rawMsg.toLowerCase().includes('maxebaylisting') ||
+        rawMsg.toLowerCase().includes('max_ebay_listing') ||
+        rawMsg.toLowerCase().includes('cannot read properties of undefined') ||
+        rawMsg.toLowerCase().includes('plan allows up to') ||
+        rawMsg.toLowerCase().includes('upgrade your plan');
+
+      const isZipError =
+        rawMsg.toLowerCase().includes('zip code') ||
+        rawMsg.toLowerCase().includes('postal code');
+
+      const isConnectionError =
+        rawMsg.toLowerCase().includes('ebay connection') ||
+        rawMsg.toLowerCase().includes('reconnect');
+
+      if (isPlanLimitError) {
+        Alert.alert(
+          'Account Setup Incomplete',
+          'Your account subscription settings are not fully configured yet. Please contact your administrator to complete the account setup, then try publishing again.\n\nYour draft has been saved and is ready to publish once the account is set up.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Listings') }]
+        );
+      } else if (isZipError) {
         Alert.alert(
           'Missing Shipping ZIP Code',
           'Please go back to Step 9 (Location) and select an eBay inventory location with a ZIP code.'
         );
+      } else if (isConnectionError) {
+        Alert.alert(
+          'eBay Connection Required',
+          'Your eBay account connection has expired or is not set up. Please ask your administrator to reconnect the eBay account in Settings, then try again.\n\nYour draft has been saved.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Listings') }]
+        );
       } else {
-        Alert.alert('Publish Failed', msg || 'Unable to publish to eBay. Your draft has been saved.');
+        Alert.alert(
+          'Publish Failed',
+          rawMsg || 'Unable to publish to eBay. Your draft has been saved. Please try again or contact support.',
+          [{ text: 'OK' }]
+        );
       }
     },
   });

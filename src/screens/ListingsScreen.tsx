@@ -155,20 +155,55 @@ export function ListingsScreen({ navigation }: any) {
       Alert.alert('Published!', 'Successfully listed draft to eBay live listings!');
     },
     onError: (err: any) => {
-      if (err.message && err.message.toLowerCase().includes('zip code')) {
+      // Safely extract error message across all tRPC error shapes
+      const rawMsg: string =
+        err?.message ||
+        err?.data?.message ||
+        err?.shape?.message ||
+        '';
+
+      const isPlanLimitError =
+        rawMsg.toLowerCase().includes('maxebaylisting') ||
+        rawMsg.toLowerCase().includes('max_ebay_listing') ||
+        rawMsg.toLowerCase().includes('cannot read properties of undefined') ||
+        rawMsg.toLowerCase().includes('plan allows up to') ||
+        rawMsg.toLowerCase().includes('upgrade your plan');
+
+      const isZipError =
+        rawMsg.toLowerCase().includes('zip code') ||
+        rawMsg.toLowerCase().includes('postal code');
+
+      const isConnectionError =
+        rawMsg.toLowerCase().includes('ebay connection') ||
+        rawMsg.toLowerCase().includes('reconnect');
+
+      if (isPlanLimitError) {
+        Alert.alert(
+          'Account Setup Incomplete',
+          'Your account subscription settings are not fully configured yet. Please contact your administrator to complete the account setup, then try publishing again.\n\nYour draft has been saved and is ready to publish once the account is set up.'
+        );
+      } else if (isZipError) {
         Alert.alert(
           'Missing Shipping ZIP Code',
           'Your listing draft is missing the eBay Shipping Origin ZIP Code. This is required by eBay to calculate shipping costs.\n\nWould you like to edit this draft and select an eBay inventory location?',
           [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Edit Draft', 
-              onPress: () => navigation.navigate('CreateListing', { draftId: publishDraftMutation.variables?.draftId }) 
+            {
+              text: 'Edit Draft',
+              onPress: () => navigation.navigate('CreateListing', { draftId: publishDraftMutation.variables?.draftId })
             }
           ]
         );
+      } else if (isConnectionError) {
+        Alert.alert(
+          'eBay Connection Required',
+          'Your eBay account connection has expired or is not set up. Please ask your administrator to reconnect the eBay account in Settings, then try again.\n\nYour draft has been saved.'
+        );
       } else {
-        Alert.alert('Publish Failed', err.message || 'Unable to publish to eBay.');
+        Alert.alert(
+          'Publish Failed',
+          rawMsg || 'Unable to publish to eBay. Your draft has been saved. Please try again or contact support.'
+        );
       }
     }
   });
