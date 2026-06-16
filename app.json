@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.stocknestpro.app",
-      "buildNumber": "61",
+      "buildNumber": "63",
       "infoPlist": {
         "NSCameraUsageDescription": "StockNestPro needs camera access to scan physical inventory barcodes and location QR codes.",
         "NSMicrophoneUsageDescription": "StockNestPro needs microphone access for video features.",
@@ -31,9 +31,12 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.stocknestpro.app",
-      "versionCode": 42,
+      "versionCode": 44,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -53,6 +56,12 @@
         }
       ],
       "./withDisableDsym"
-    ]
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2cb6dfb5-1ff7-4565-b25e-528d05bfd1e9"
+    }
   }
 }
