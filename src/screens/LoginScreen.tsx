@@ -37,17 +37,37 @@ export function LoginScreen() {
         password: password,
       });
 
-      if (response && response.success && response.token && response.user) {
+      // Support all possible backend response shapes for the token
+      const token =
+        response?.token ||
+        response?.accessToken ||
+        response?.jwt ||
+        response?.data?.token ||
+        response?.data?.accessToken;
+
+      // Support all possible backend response shapes for the user
+      const user = response?.user || response?.data?.user || response?.data;
+
+      if (token && user) {
         const userObj = {
-          id: response.user.id,
-          name: response.user.name || 'Warehouse Operator',
-          email: response.user.email || email,
-          role: response.user.role || 'user',
-          companyId: response.user.companyId || 1,
+          id: user.id,
+          name: user.name || 'Warehouse Operator',
+          email: user.email || email,
+          role: user.role || 'user',
+          companyId: user.companyId || 1,
         };
-        await login(response.token, userObj);
+        await login(token, userObj);
+      } else if (token && !user) {
+        // Token exists but user shape is unexpected — log in with minimal info
+        await login(token, {
+          id: 0,
+          name: 'Warehouse Operator',
+          email: email,
+          role: 'user',
+          companyId: 1,
+        });
       } else {
-        setError('Login succeeded but no token was returned.');
+        setError('Login succeeded but no token was returned. Please contact your administrator.');
       }
     } catch (err: any) {
       console.error('Login error:', err);
