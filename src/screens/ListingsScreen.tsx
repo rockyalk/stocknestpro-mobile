@@ -161,10 +161,12 @@ export function ListingsScreen({ navigation }: any) {
         err?.shape?.message ||
         '';
 
+      // Only explicit plan/subscription limit messages should show the account setup
+      // guidance. Generic backend TypeErrors must remain visible as publish failures
+      // so eBay/location/policy issues are not misclassified as subscription setup.
       const isPlanLimitError =
         rawMsg.toLowerCase().includes('maxebaylisting') ||
         rawMsg.toLowerCase().includes('max_ebay_listing') ||
-        rawMsg.toLowerCase().includes('cannot read properties of undefined') ||
         rawMsg.toLowerCase().includes('plan allows up to') ||
         rawMsg.toLowerCase().includes('upgrade your plan');
 

@@ -228,11 +228,10 @@ export default function CreateListingScreen({ route, navigation }: any) {
       setLoading(false);
       setLoadingText(null);
 
-      // Safely extract the error message — the backend may throw a raw JS error
-      // (e.g. "Cannot read properties of undefined (reading 'maxEbayListing')") which
-      // means the plan/subscription data for this account is not yet initialised in
-      // the database.  We catch that specific pattern and show a friendly message
-      // so the employee is not left with a confusing crash string.
+      // Safely extract the error message across tRPC error shapes.
+      // Only explicit plan/subscription limit messages should show the account setup
+      // guidance. Generic backend TypeErrors must remain visible as publish failures
+      // so eBay/location/policy issues are not misclassified as subscription setup.
       const rawMsg: string =
         err?.message ||
         err?.data?.message ||
@@ -242,7 +241,6 @@ export default function CreateListingScreen({ route, navigation }: any) {
       const isPlanLimitError =
         rawMsg.toLowerCase().includes('maxebaylisting') ||
         rawMsg.toLowerCase().includes('max_ebay_listing') ||
-        rawMsg.toLowerCase().includes('cannot read properties of undefined') ||
         rawMsg.toLowerCase().includes('plan allows up to') ||
         rawMsg.toLowerCase().includes('upgrade your plan');
 
