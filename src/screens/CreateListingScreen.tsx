@@ -867,9 +867,10 @@ export default function CreateListingScreen({ route, navigation }: any) {
       const token = await AsyncStorage.getItem('auth_token');
       const response = await fetch('https://stocknestpro.com/api/upload/listing-image', {
         method: 'POST',
+        credentials: 'include' as any,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
+          ...(token && token !== 'cookie-session' ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           fileName,

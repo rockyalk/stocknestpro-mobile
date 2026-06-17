@@ -48,26 +48,26 @@ export function LoginScreen() {
       // Support all possible backend response shapes for the user
       const user = response?.user || response?.data?.user || response?.data;
 
-      if (token && user) {
+      if (user) {
         const userObj = {
           id: user.id,
           name: user.name || 'Warehouse Operator',
           email: user.email || email,
           role: user.role || 'user',
-          companyId: user.companyId || 1,
+          companyId: user.companyId || user.company?.id || null,
         };
-        await login(token, userObj);
+        await login(token || 'cookie-session', userObj);
       } else if (token && !user) {
-        // Token exists but user shape is unexpected — log in with minimal info
+        // Token exists but user shape is unexpected — log in with minimal info.
         await login(token, {
           id: 0,
           name: 'Warehouse Operator',
           email: email,
           role: 'user',
-          companyId: 1,
+          companyId: null,
         });
       } else {
-        setError('Login succeeded but no token was returned. Please contact your administrator.');
+        setError('Login succeeded but no user session was returned. Please contact your administrator.');
       }
     } catch (err: any) {
       console.error('Login error:', err);

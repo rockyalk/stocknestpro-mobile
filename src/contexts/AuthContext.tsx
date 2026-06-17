@@ -2,10 +2,11 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface User {
-  id: string;
+  id: string | number;
   email: string;
   name?: string | null;
   role?: string;
+  companyId?: string | number | null;
 }
 
 interface AuthContextType {

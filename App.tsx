@@ -30,11 +30,17 @@ export default function App() {
       links: [
         httpBatchLink({
           url: 'https://stocknestpro.com/api/trpc',
+          fetch(url, options) {
+            return fetch(url, {
+              ...options,
+              credentials: 'include' as any,
+            });
+          },
           async headers() {
             const token = await AsyncStorage.getItem('auth_token');
-            return {
-              Authorization: token ? `Bearer ${token}` : '',
-            };
+            return token && token !== 'cookie-session'
+              ? { Authorization: `Bearer ${token}` }
+              : {};
           },
         }),
       ],
