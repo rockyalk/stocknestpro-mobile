@@ -27,13 +27,22 @@ export function MoreScreen() {
     enabled: !!user,
   });
 
+  // Mobile must sync through the StockNestPro backend, not directly with eBay.
+  // Reuse the same backend contract as the web app: list the tenant's eBay connections,
+  // choose the active connection, then call ebay.triggerSync({ connectionId }).
+  const connectionsQuery = (trpc as any).ebay.listConnections.useQuery(undefined, {
+    enabled: !!user,
+  });
+
   const utils = (trpc as any).useUtils();
 
-  // Mutation to trigger company sync
-  const syncMutation = (trpc as any).ebay.triggerCompanySync.useMutation({
+  // Mutation to trigger eBay sync through the existing backend procedure.
+  const syncMutation = (trpc as any).ebay.triggerSync.useMutation({
     onSuccess: (res: any) => {
       utils.analytics.getMobileDashboard.invalidate();
-      Alert.alert('Sync Complete', res?.message || 'Successfully synced listings and orders from eBay!');
+      utils.ebay.listConnections.invalidate();
+      utils.ebay.listListings.invalidate();
+      Alert.alert('Sync Complete', res?.message || 'Successfully synced listings from eBay!');
     },
     onError: (err: any) => {
       Alert.alert('Error', err?.message || 'Unable to sync with eBay.');
@@ -41,8 +50,16 @@ export function MoreScreen() {
   });
 
   const handleManualSync = async () => {
+    const connections = Array.isArray(connectionsQuery.data) ? connectionsQuery.data : [];
+    const activeConnection = connections.find((connection: any) => connection?.isActive) || connections[0];
+
+    if (!activeConnection?.id) {
+      Alert.alert('eBay Not Connected', 'Please connect an eBay account from the web app before syncing from mobile.');
+      return;
+    }
+
     try {
-      await syncMutation.mutateAsync();
+      await syncMutation.mutateAsync({ connectionId: activeConnection.id });
     } catch (e) {}
   };
 
@@ -52,7 +69,7 @@ export function MoreScreen() {
     shippoStatus: undefined,
   };
 
-  const isSyncing = syncMutation.isLoading;
+  const isSyncing = syncMutation.isLoading || connectionsQuery.isLoading;
 
   const getPrintAgentStatus = () => {
     const status = data.printAgentStatus || 'online';
@@ -179,7 +196,7 @@ export function MoreScreen() {
         <TouchableOpacity
           className="bg-sky-50 border border-sky-100 h-14 rounded-2xl flex-row items-center justify-center active:bg-sky-100 mb-4"
           onPress={handleManualSync}
-          disabled={isSyncing}
+          disabled={isSyncing || !user}
         >
           {isSyncing ? (
             <ActivityIndicator size="small" color="#0284c7" className="mr-2" />
