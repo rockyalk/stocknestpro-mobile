@@ -64,6 +64,23 @@ const STEPS = [
   { id: 12, name: 'Review' },
 ];
 
+type MobileListingCondition = 'new' | 'open_box' | 'used' | 'for_parts';
+type BackendListingCondition = 'new' | 'like_new' | 'good' | 'fair' | 'poor';
+
+const toBackendCondition = (value: MobileListingCondition): BackendListingCondition => {
+  switch (value) {
+    case 'new':
+      return 'new';
+    case 'open_box':
+      return 'like_new';
+    case 'for_parts':
+      return 'poor';
+    case 'used':
+    default:
+      return 'good';
+  }
+};
+
 export default function CreateListingScreen({ route, navigation }: any) {
   const draftId = route?.params?.draftId;
   const utils = (trpc as any).useUtils();
@@ -88,7 +105,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
   const [price, setPrice] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [quantity, setQuantity] = useState('1');
-  const [condition, setCondition] = useState<'new' | 'open_box' | 'used' | 'for_parts'>('used');
+  const [condition, setCondition] = useState<MobileListingCondition>('used');
   const [categoryId, setCategoryId] = useState('');
   const [categoryName, setCategoryName] = useState('');
   const [specifics, setSpecifics] = useState<SpecificInput[]>([]);
@@ -628,7 +645,7 @@ export default function CreateListingScreen({ route, navigation }: any) {
     listingPrice: Number(price),
     costPrice: costPrice ? Number(costPrice) : undefined,
     quantity: Number(quantity),
-    condition,
+    condition: toBackendCondition(condition),
     categoryId,
     categoryName,
     categoryPath: categoryName,

@@ -876,7 +876,7 @@ export function ListingsScreen({ navigation }: any) {
         imageUrl: selectedListing.imageUrl || undefined,
         warehouseId: selectedWarehouseId || resolvedLocationNode.warehouseId || 1,
         locationNodeId: resolvedLocationNode.id,
-        condition: 'used'
+        condition: 'good'
       });
     }
   };
